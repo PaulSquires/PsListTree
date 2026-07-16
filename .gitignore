@@ -1,0 +1,15 @@
+# FreeBASIC build artifacts
+*.exe
+*.dll
+*.o
+*.obj
+*.a
+*.lib
+*.map
+*.pdb
+
+# Editor / OS cruft
+*.bak
+*~
+Thumbs.db
+desktop.ini

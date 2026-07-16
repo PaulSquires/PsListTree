@@ -1,0 +1,148 @@
+# CListBox Refactor Plan
+
+Reusable, multiple-instance owner-drawn listbox control for the Tiko project.
+
+Scope decisions (confirmed 2026-07-16):
+- **Fonts**: caller supplies `HFONT` handles; the control stores no references to host-app globals.
+- **Selection**: distinct selected / hover / focus visual states, **plus** working multi-selection.
+- **Headers**: design for collapsible header/group rows now. **Flat groups — one level of nesting
+  only** (header rows + their direct child items; no nested headers). Header rows **are
+  selectable** and participate in keyboard navigation like any other row.
+- **Selection storage**: tracked **in the model** (per-row selected flag), not delegated to the
+  listbox's own selection bits.
+- **Keyboard**: full keyboard navigation built into the control.
+
+Because collapsible headers change how many rows are visible, and `LBS_NODATA` requires the
+listbox item count to equal the number of *visible* rows, this refactor requires a **model/view
+split**, not just bug fixes. Phases are ordered so each is independently testable.
+
+---
+
+## Phase 0 — Decouple from host-app globals
+
+Goal: the control + double buffer compile and run without any tiko-specific globals.
+
+- `clsDoubleBuffer` currently references `ghFont()`, `HWND_FRMMAIN` (clsDoubleBuffer.inc:89),
+  and the `GUIFONT_10` enum (clsDoubleBuffer.bi:32). Remove all three.
+- Change `clsDoubleBuffer.SetFont` to take an `HFONT` directly instead of an index into a global
+  array. The caller (control or paint callback) owns the fonts.
+- Add font storage to the control: `CListBox_SetFont( hCtl, HFONT )` (and/or let the paint
+  callback select a font per row). Control never creates or owns fonts it wasn't given.
+- Add a destructor to `clsDoubleBuffer` (RAII) so an early return between Begin/End can't leak
+  the memDC/bitmap. Keep `EndDoubleBuffer` for explicit use.
+- Verify `clsDoubleBuffer.bi/.inc` includes only `windows.bi` + AfxNova — no app headers.
+
+Test: control compiles in an empty host that defines none of tiko's globals.
+
+---
+
+## Phase 1 — Multi-instance correctness & API bug fixes
+
+Goal: two instances on screen behave independently; existing API is correct. No new features.
+
+- **Move shared statics into the instance.** `static m` (CListBox.inc:422) and `static nLastIdx`
+  (CListBox.inc:426) in the subclass proc are shared across all instances — move both into the
+  per-instance `CLISTBOX`.
+- **Fix selection targeting.** `CListBox_GetCurSel`/`SetCurSel` (CListBox.inc:163-173) send
+  `LB_GETCURSEL`/`LB_SETCURSEL` to the form handle, not the child listbox. Route through
+  `GetDlgItem(hWin, idc_ListBox)` like `GetCount` does. Verify against the demo's `SetCurSel(0)`.
+- **Null-check callbacks** before calling `PaintCallback` (CListBox.inc:357) and
+  `MessageCallback` (subclass) so an instance without callbacks set doesn't fault.
+- **Fix `SetMessageCallback` return** (CListBox.inc:104-108) — add the success return.
+- **Make `SetRowHeight` effective post-creation** — issue `LB_SETITEMHEIGHT` (or force a
+  re-measure) rather than only updating the field (CListBox.inc:189-194).
+- **Normalize boolean returns** — `SetText`/`SetItemData` currently return `true` for *error*;
+  pick one convention (recommend `true` = success) and apply it across the API.
+- **Clarify the handle.** The public `hListControl` param is actually the parent form handle.
+  Rename/document, or introduce an opaque handle type, so callers aren't misled.
+
+Test: side-by-side two-instance harness; hover/selection in one must not affect the other.
+
+---
+
+## Phase 2 — Data model rework (enables headers + fixes count duplication)
+
+Goal: one source of truth; support insert/delete/clear; support collapsible groups.
+
+- **Model vs. view split.** Keep `rows()` as the full model (all rows, including collapsed
+  children). Add a `visibleIndex()` map (visible position -> model row) rebuilt on
+  expand/collapse. Set `LB_SETCOUNT` to the *visible* count. `WM_DRAWITEM.itemID` indexes the
+  visible map, not the model directly.
+- **Flat grouping (one level).** A row is either a header or an item; items belong to the nearest
+  preceding header (or to an implicit top-level group if none). No nested headers. Collapsing a
+  header hides its direct child items only. This keeps the model/view map a simple linear scan.
+- **Single source of truth for count.** Derive the listbox count from the model/view; never let
+  the `rows()` ubound and the listbox count drift (today `AddRow` maintains both, CListBox.inc:69-76).
+- **Add operations:** `Clear/Reset`, `InsertRow`, `DeleteRow`, plus header/group rows using the
+  existing `IsHeader`/`bCollapsed` fields (CListBox.bi:26-27) with `Expand`/`Collapse`/`Toggle`.
+- **Bulk-load performance.** Replace one-at-a-time `redim preserve` (CListBox.inc:70-71, O(n^2))
+  with chunked growth, and add `BeginUpdate`/`EndUpdate` to defer `LB_SETCOUNT`/repaint during
+  bulk inserts.
+
+Resolved design decisions:
+- Header rows **are selectable** and behave like items for keyboard nav and selection.
+- **Flat groups, one level of nesting** — no nested headers.
+
+Test: collapse/expand toggles visible count correctly; bulk-add of several thousand rows is fast;
+selecting a header row works the same as selecting an item.
+
+---
+
+## Phase 3 — Selection states, multi-select, keyboard nav
+
+Goal: the visual + input model tiko needs.
+
+- **Distinct paint states.** Replace the single `isHot` (CListBox.inc:339-342) in
+  `CLISTBOX_PAINTINFO` with separate `isSelected`, `isHot` (hover), `isFocused` so the paint
+  callback can style each independently.
+- **Multi-select, model-based selection.** Selection is stored in the model as a per-row
+  `selected` flag on `CLISTBOX_ROWINFO`, **not** in the listbox's own selection bits — this
+  survives collapse/expand index shifts and lets header rows be selected. The underlying listbox
+  is driven from the model for painting; do not rely on `LB_GETSEL`/`LB_SETSEL` as the source of
+  truth. Add `CListBox_SetMultiSelect`/`SetExtendedSelect` that take effect at creation (today
+  `ExtendSel`/`MultipleSel` are read from defaults that can't be changed, CListBox.inc:584-585),
+  plus `GetSelCount`/`GetSelItems`/`GetSel`/`SetSel` operating on the model flags.
+  - Collapsing a header does not clear its children's selection flags; selection is retained in
+    the model even while hidden. **`GetSelItems` reports ALL selected model rows, including
+    hidden-but-selected rows under a collapsed header** (not just visible ones).
+- **Header vs. item must be distinguishable to callers.** Since header rows are selectable and
+  `GetSelItems` returns them alongside normal items, the caller needs to tell them apart. Add a
+  query API — e.g. `CListBox_IsHeader( hCtl, row ) as boolean` — and/or return the row-type flag
+  as part of the `GetSelItems` result, so the caller can act differently on a selected header vs.
+  a selected item. Back it with the existing `CLISTBOX_ROWINFO.IsHeader` field.
+- **Full keyboard nav** in the subclass `WM_KEYDOWN`: Up/Down, PageUp/PageDown, Home/End with
+  ensure-visible; Left/Right to collapse/expand header rows; Space / Ctrl+click / Shift+click for
+  multi-select; optional type-to-search.
+
+Test: keyboard-only navigation reaches every row; multi-select count matches; selection survives
+collapse/expand.
+
+---
+
+## Phase 4 — Rendering performance & polish
+
+- **Stop per-row bitmap churn.** `clsDoubleBuffer` allocates+frees a compatible DC and bitmap on
+  every `WM_DRAWITEM` (clsDoubleBuffer.inc:35-41, 62-69) — i.e., per row per repaint. Cache a
+  per-control memDC/bitmap sized to one row (or the client) and reuse.
+- **Mouse wheel:** respect `SPI_GETWHEELSCROLLLINES` instead of the hardcoded 3 lines
+  (CListBox.inc:452), and preserve the delta remainder rather than resetting to 0.
+- **Fix `ClassStyle` timing/comment.** It's set after `Create` with a comment that misdescribes
+  `CS_DBLCLKS` (CListBox.inc:572-573). Set it correctly at creation and fix the comment.
+
+---
+
+## Phase 5 — API surface & documentation
+
+- Consistent `CListBox_*` naming; documented public header.
+- Document the callback contracts (paint + message) and the form-vs-listbox handle convention.
+- Consider an opaque handle type so callers can't accidentally pass the wrong HWND.
+- Expand `main.bas` into a real test harness: two instances, headers with collapse, multi-select,
+  keyboard-only run-through.
+
+---
+
+## Suggested sequencing
+
+Phases 0 and 1 are safe, high-value, and unblock everything else — do them first and independently.
+Phase 2 is the architectural core (model/view) and should land before 3, since selection and
+keyboard nav both depend on the visible-index mapping. Phase 4/5 are polish once behavior is right.

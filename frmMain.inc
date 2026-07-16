@@ -1,0 +1,228 @@
+#include once "frmMain.bi"
+#include once "clsDoubleBuffer.bi"
+
+
+' ========================================================================================
+' Process WM_PAINT message for window/dialog: frmMain
+' ========================================================================================
+function frmMain_OnPaint( byval hwnd as HWND ) as LRESULT
+    dim as clsDoubleBuffer b
+
+    b.BeginDoubleBuffer(hwnd)
+    b.SetBackColors( theme.BackColorPanel, theme.BackColorPanel )
+    b.PaintClientRect()
+
+    b.EndDoubleBuffer()
+    
+    function = 0
+end function
+
+
+' ========================================================================================
+' Process WM_CREATE message for window/dialog: frmMain
+' ========================================================================================
+function frmMain_OnCreate( _
+            byval hwnd as HWND, _
+            byval lpCreateStructPtr as LPCREATESTRUCT _
+            ) as boolean
+
+    ' Enable drag and drop files
+    DragAcceptFiles hwnd, CTRUE
+    
+    '  Message cracker macro expects a true to be returned for a successful
+    '  OnCreate handler even though returning -1 from a standard WM_CREATE
+    '  call would stop creating the window. This is just one of those Windows
+    '  inconsistencies.
+    return true
+end Function
+
+
+' ========================================================================================
+' Process WM_CLOSE message for window/dialog: frmMain
+' ========================================================================================
+function frmMain_OnClose( byval hwnd as HWND ) as LRESULT
+
+    DestroyWindow(hwnd)
+    
+    function = 0
+end Function
+
+
+' ========================================================================================
+' Process WM_DESTROY message for window/dialog: frmMain
+' ========================================================================================
+function frmMain_OnDestroy( byval hwnd as HWND ) as LRESULT
+
+    ' Disable drag and drop files
+    DragAcceptFiles hwnd, false
+    
+    PostQuitMessage(0)
+    
+    function = 0
+end Function
+
+
+' ========================================================================================
+' frmMain Window procedure
+' ========================================================================================
+function frmMain_WndProc( _
+            byval hwnd   as HWND, _
+            byval uMsg   as UINT, _
+            byval wParam as WPARAM, _
+            byval lParam as LPARAM _
+            ) as LRESULT
+
+    select case uMsg
+        HANDLE_MSG (hwnd, WM_CREATE,        frmMain_OnCreate)
+        HANDLE_MSG (hwnd, WM_PAINT,         frmMain_OnPaint)
+        HANDLE_MSG (hwnd, WM_CLOSE,         frmMain_OnClose)
+        HANDLE_MSG (hwnd, WM_DESTROY,       frmMain_OnDestroy)
+
+        case WM_NCDESTROY
+            ' delete the allocated memory for window
+            dim as CWindow ptr pWindow = AfxCWindowPtr(hwnd)
+            if pWindow then delete(pWindow)
+            HWND_FRMMAIN = 0
+            return 0
+
+        case WM_ERASEBKGND
+            return true      ' prevents painting the background
+            
+        case WM_SYSCOMMAND
+            if (wParam and &HFFF0) = SC_CLOSE then
+                SendMessage( hwnd, WM_CLOSE, wParam, lParam )
+                exit function
+            end if
+            
+    end select 
+
+    ' for messages that we don't deal with
+    function = DefWindowProc(HWnd, uMsg, wParam, lParam)
+
+end Function
+
+
+
+
+' ========================================================================================
+' CListBox_PaintCallback
+' ========================================================================================
+sub CListBox_PaintCallback( byval p as CLISTBOX_PAINTINFO ptr )
+
+    dim as COLORREF backclr = iif( p->isHot, theme.BackColorHot, theme.BackColor)
+    dim as COLORREF foreclr = iif( p->isHot, theme.ForeColorHot, theme.ForeColor)
+    p->b.SetForeColors(foreclr, foreclr)
+    p->b.SetBackColors(backclr, backclr)
+
+    ' Paint the entire row background
+    p->b.PaintRect( @p->rc )
+
+    p->b.SetFont( GUIFONT_10 )
+    p->b.PaintText( p->wszCaption, @p->rc, DT_LEFT )
+
+end sub
+
+' ========================================================================================
+' CListBox_MessageCallback
+' ========================================================================================
+function CListBox_MessageCallback( byval m as CLISTBOX_MESSAGEINFO ptr ) as boolean
+
+    select case m->uMsg
+             
+        case WM_MOUSEWHEEL
+            print "WM_MOUSEWHEEL"
+            return true
+
+        case WM_MOUSEHOVER
+            print "WM_MOUSEHOVER on idx: "; m->idx
+            dim as DWSTRING wszCaption = "Tooltip " & m->idx
+            CListBox_SetTooltip( GetParent(m->hList), wszCaption )
+            return true
+            
+        case WM_LBUTTONUP
+            print "WM_LBUTTONUP on idx: "; m->idx
+            ' Return True because we processed this message and do not want
+            ' the default windows handler to process it also.
+            return true
+    
+    end select
+
+    ' Return false to allow to fall to the default windows handler
+    return false
+end function    
+
+
+' ========================================================================================
+' frmMain_Show
+' ========================================================================================
+function frmMain_Show( byval hWndParent as HWND ) as LRESULT
+
+    '  Create the main window and child controls
+    dim pWindow as CWindow ptr = new CWindow(APPCLASSNAME)
+    
+    ghFont(GUIFONT_9)      = pWindow->CreateFont(GUIFONT, 9, FW_NORMAL) 
+    ghFont(GUIFONT_10)     = pWindow->CreateFont(GUIFONT, 10, FW_NORMAL)
+    ghFont(GUIFONTBOLD_10) = pWindow->CreateFont(GUIFONT, 10, FW_HEAVY)
+    ghFont(ITALICFONT_10)  = pWindow->CreateFont(GUIFIXEDFONT, 10, FW_NORMAL, CTRUE)
+    ghFont(INFOFONT_11)    = pWindow->CreateFont(GUIFIXEDFONT, 11, FW_NORMAL)
+    ghFont(SYMBOLFONT_9)   = pWindow->CreateFont(SYMBOLFONT, 9, FW_NORMAL)
+    ghFont(SYMBOLFONT_10)  = pWindow->CreateFont(SYMBOLFONT, 10, FW_NORMAL)
+    ghFont(SYMBOLFONT_12)  = pWindow->CreateFont(SYMBOLFONT, 12, FW_NORMAL)
+
+    HWND_FRMMAIN = pWindow->Create( _
+            null, APPNAME, @frmMain_WndProc, _
+            100, 100, 800, 600 _
+            )
+
+    HWND_FRMEXPLORER = CListBox_Create( HWND_FRMMAIN, IDC_FRMMAIN_LISTBOX )
+    
+    dim as RECT rc: GetClientRect( HWND_FRMMAIN, @rc )
+    SetWindowPos( HWND_FRMEXPLORER, 0, _
+        rc.left, rc.top, (rc.right / 2), rc.bottom, _
+        SWP_NOZORDER or SWP_SHOWWINDOW )
+    
+
+    CListBox_SetPaintCallback( HWND_FRMEXPLORER, @CListBox_PaintCallback )    
+    CListBox_SetMessageCallback( HWND_FRMEXPLORER, @CListBox_MessageCallback )    
+    CListBox_SetBackColor( HWND_FRMEXPLORER, theme.BackColor )    
+
+    for i as integer = 0 to 200
+        CListBox_AddString( HWND_FRMEXPLORER, "Paul Squires - " & i, 1000 + i )    
+    next    
+    CListBox_SetCurSel( HWND_FRMEXPLORER, 0 )
+    CListBox_Refresh( HWND_FRMEXPLORER )
+            
+dim as integer nCount = CListBox_GetCount( HWND_FRMEXPLORER )
+print "Count: "; nCount
+
+    
+    UpdateWindow( pWindow->hWindow )
+    ShowWindow( pWindow->hWindow, SW_SHOW )
+
+    ' Process windows events
+    dim uMsg as MSG
+
+    ' Message loop
+    do while GetMessage(@uMsg, null, 0, 0)
+        if uMsg.message = WM_QUIT then exit do
+
+        ' Processes accelerator keys for menu commands
+        if (pWindow->AccelHandle = 0) orelse (TranslateAccelerator(pWindow->hWindow, pWindow->AccelHandle, @uMsg) = 0) then
+
+            if IsDialogMessage(pWindow->hWindow, @uMsg) = 0 then
+                TranslateMessage @uMsg    ' Translates virtual-key messages into character messages.
+                DispatchMessage @uMsg     ' Dispatches a message to a window procedure.
+            end if
+
+        end if  ' accelerators
+    loop  ' message loop
+    
+    function = uMsg.wParam
+
+
+    for i as long = 0 to MAXFONTS
+        if ghFont(i) then DeleteObject(ghFont(i))
+    next
+
+end function
+
