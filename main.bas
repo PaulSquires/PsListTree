@@ -44,6 +44,9 @@ type THEME_TYPE
     BackColor          as COLORREF = BGR(33,37,43)
     ForeColorHot       as COLORREF = BGR(204,204,204)
     BackColorHot       as COLORREF = BGR(44,49,58)
+    ForeColorSelect    as COLORREF = BGR(255,255,255)
+    BackColorSelect    as COLORREF = BGR(38,79,120)
+    FocusAccent        as COLORREF = BGR(86,156,214)
 end type
 dim shared theme as THEME_TYPE
 

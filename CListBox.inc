@@ -248,22 +248,22 @@ end function
 
 
 ' ========================================================================================
-' Set the tooltip for the custom listbox control.
+' Set the on-demand tooltip text callback. If none is set, the tooltip shows the
+' hovered row's Text. Return "" from the callback to suppress the tooltip.
 ' ========================================================================================
-sub CListBox_SetTooltip( byval hListControl as HWND, byval wszTooltip as DWSTRING )
+sub CListBox_SetTooltipCallback( byval hListControl as HWND, byval userfunc as TooltipCallbackFunc )
     dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return
-    ' Only set the tooltip if it has changed
-    if pList->wszTooltip <> wszTooltip then
-        pList->wszTooltip = wszTooltip
-        ' The tooltip tool was registered against the CHILD listbox (see
-        ' AfxAddTooltip in CListBox_Create), so the text must be set against
-        ' that same handle -- NOT the form (pList->hWin), or TTM_GETTOOLINFOW
-        ' fails to find the tool and the text is silently dropped.
-        dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
-        AfxSetTooltipText( pList->hTooltip, hList, wszTooltip )
-    end if
+    pList->TooltipCallback = userfunc
 end sub
+
+
+' Resolve the tooltip text for a model row: host callback if set, else row Text.
+function CListBox_ResolveTooltipText( byval pList as CLISTBOX ptr, byval modelRow as integer ) as DWSTRING
+    if (pList = null) orelse (pList->IsValidRow(modelRow) = false) then return ""
+    if pList->TooltipCallback then return pList->TooltipCallback( pList->hWin, modelRow )
+    return pList->rows(modelRow).Text
+end function
 
 
 ' ========================================================================================
@@ -303,29 +303,114 @@ end function
 
 
 ' ========================================================================================
-' Retrieve the current selected row (MODEL index) from the custom listbox control.
-' Returns -1 if there is no selection.
+' Retrieve the focused/current row (MODEL index), or -1 if none.
 ' ========================================================================================
 function CListBox_GetCurSel( byval hListControl as HWND ) as integer
     dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return -1
-    ' The listbox tracks selection by VISIBLE index; translate back to the model.
-    dim as integer visSel = ListBox_GetCurSel( GetDlgItem( pList->hWin, pList->idc_ListBox ) )
-    return pList->VisibleToModel( visSel )
+    return pList->focusRow
 end function
 
 
 ' ========================================================================================
-' Set the current selected row by MODEL index. If the row is currently hidden
-' (under a collapsed header) the selection is cleared. Returns the model row
-' selected, or -1 if it was not visible.
+' Focus and select a single row by MODEL index (clears any other selection).
+' Returns the row, or -1 if the index is invalid.
 ' ========================================================================================
 function CListBox_SetCurSel( byval hListControl as HWND, byval row as integer ) as integer
     dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return -1
+    dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
+    if pList->IsValidRow(row) = false then
+        pList->ClearSelection()
+        pList->focusRow  = -1
+        pList->anchorRow = -1
+        if hList then InvalidateRect( hList, NULL, FALSE )
+        return -1
+    end if
+    pList->SelectOnly( row )
+    pList->focusRow  = row
+    pList->anchorRow = row
+    ' keep the listbox caret in sync (for scrolling) when the row is visible
     dim as integer visRow = pList->ModelToVisible( row )
-    ListBox_SetCurSel( GetDlgItem( pList->hWin, pList->idc_ListBox ), visRow )
-    return iif( visRow >= 0, row, -1 )
+    if (hList andalso visRow >= 0) then ListBox_SetCurSel( hList, visRow )
+    if hList then InvalidateRect( hList, NULL, FALSE )
+    return row
+end function
+
+
+' ========================================================================================
+' Model-based selection API. Selection lives on the rows (per-row flag), so it
+' survives collapse/expand and can include headers and hidden rows.
+' ========================================================================================
+function CListBox_GetSel( byval hListControl as HWND, byval row as integer ) as boolean
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return false
+    return pList->IsRowSelected( row )
+end function
+
+function CListBox_SetSel( byval hListControl as HWND, byval row as integer, byval state as boolean ) as boolean
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return false
+    if pList->IsValidRow(row) = false then return false
+    pList->SetRowSelected( row, state )
+    dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
+    if hList then InvalidateRect( hList, NULL, FALSE )
+    return true
+end function
+
+function CListBox_GetSelCount( byval hListControl as HWND ) as integer
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return 0
+    return pList->GetSelCount()
+end function
+
+' Fill selItems() with the MODEL indices of every selected row (including hidden
+' rows under a collapsed header). Returns the count.
+function CListBox_GetSelItems( byval hListControl as HWND, selItems() as integer ) as integer
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return 0
+    dim as integer n = pList->GetSelCount()
+    if n = 0 then
+        erase selItems
+        return 0
+    end if
+    redim selItems( 0 to n - 1 )
+    dim as integer k = 0
+    for i as integer = 0 to pList->rowCount - 1
+        if pList->rows(i).selected then
+            selItems(k) = i
+            k += 1
+        end if
+    next
+    return n
+end function
+
+sub CListBox_SelectAll( byval hListControl as HWND, byval state as boolean )
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return
+    for i as integer = 0 to pList->rowCount - 1
+        pList->rows(i).selected = state
+    next
+    dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
+    if hList then InvalidateRect( hList, NULL, FALSE )
+end sub
+
+' Selection modes are mutually exclusive: extended (Shift/Ctrl ranges) vs.
+' multiple (each click toggles). Off = single-select.
+function CListBox_SetMultiSelect( byval hListControl as HWND, byval enable as boolean ) as boolean
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return false
+    pList->MultipleSel = enable
+    if enable then pList->ExtendSel = false
+    return true
+end function
+
+function CListBox_SetExtendedSelect( byval hListControl as HWND, byval enable as boolean ) as boolean
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return false
+    pList->ExtendSel = enable
+    if enable then pList->MultipleSel = false
+    return true
 end function
 
 
@@ -548,9 +633,12 @@ function CListBox_OnDrawItem( _
             .b           = @b
             .rc          = rc
             .isHot       = isHot
+            .isSelected  = false
+            .isFocused   = (modelRow = pList->focusRow)
             .isHeader    = false
             .isCollapsed = false
             if pRow then
+                .isSelected  = pRow->selected
                 .isHeader    = pRow->IsHeader
                 .isCollapsed = pRow->bCollapsed
                 .wszCaption  = pRow->Text
@@ -584,10 +672,26 @@ function CListBox_WndProc( _
         HANDLE_MSG (hwnd, WM_MEASUREITEM, CListBox_OnMeasureItem)
         HANDLE_MSG (hwnd, WM_DRAWITEM,    CListBox_OnDrawItem)
     
+    case WM_NOTIFY
+        ' The tooltip asks for its text on demand; supply the current hot row's.
+        dim as NMHDR ptr pnmh = cast(NMHDR ptr, lParam)
+        if pnmh andalso (pnmh->code = TTN_GETDISPINFOW) then
+            dim as CLISTBOX ptr pList = GetListBoxPointer(hwnd)
+            if pList then
+                dim as NMTTDISPINFOW ptr pdi = cast(NMTTDISPINFOW ptr, lParam)
+                dim as integer modelRow = pList->VisibleToModel( pList->nLastHotIdx )
+                ' store in an instance-lifetime buffer and point lpszText at it
+                pList->wszTooltip = CListBox_ResolveTooltipText( pList, modelRow )
+                pdi->lpszText = cast( LPWSTR, pList->wszTooltip.vptr )
+                pdi->hinst    = NULL
+            end if
+            return 0
+        end if
+
     case WM_NCDESTROY
         ' Delete the stored listbox data pointer
         dim as CLISTBOX ptr pList = GetListBoxPointer(hwnd)
-        if pList then 
+        if pList then
             if IsWindow(pList->hToolTip) then DestroyWindow(pList->hToolTip)
             delete(pList)
         end if
@@ -608,7 +712,167 @@ function CListBox_WndProc( _
 end function
 
 ' ========================================================================================
-' CListBoxListBox_SubclassProc 
+' Apply a mouse-click selection to the model, honoring the selection mode and the
+' Ctrl/Shift modifiers, then repaint. modelRow must be a valid model row.
+' ========================================================================================
+sub CListBox_ApplyClickSelection( byval pList as CLISTBOX ptr, byval modelRow as integer, byval isCtrl as boolean, byval isShift as boolean )
+    if (pList = null) orelse (pList->IsValidRow(modelRow) = false) then return
+
+    if pList->MultipleSel then
+        ' checklist style: every click toggles that one row
+        pList->SetRowSelected( modelRow, not pList->IsRowSelected(modelRow) )
+        pList->anchorRow = modelRow
+    elseif pList->ExtendSel then
+        if isShift then
+            dim as integer anchor = pList->anchorRow
+            if anchor < 0 then anchor = modelRow
+            if isCtrl = false then pList->ClearSelection()
+            pList->SelectRange( anchor, modelRow )
+        elseif isCtrl then
+            pList->SetRowSelected( modelRow, not pList->IsRowSelected(modelRow) )
+            pList->anchorRow = modelRow
+        else
+            pList->SelectOnly( modelRow )
+            pList->anchorRow = modelRow
+        end if
+    else
+        ' single-select
+        pList->SelectOnly( modelRow )
+        pList->anchorRow = modelRow
+    end if
+
+    pList->focusRow = modelRow
+    dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
+    if hList then InvalidateRect( hList, NULL, FALSE )
+end sub
+
+
+' ========================================================================================
+' Keyboard-navigation helpers (all operate in MODEL space; movement is over the
+' currently VISIBLE rows).
+' ========================================================================================
+function CListBox_ItemsPerPage( byval pList as CLISTBOX ptr ) as integer
+    dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
+    if hList = 0 then return 1
+    dim as long ih = SendMessage( hList, LB_GETITEMHEIGHT, 0, 0 )
+    if ih <= 0 then return 1
+    dim as RECT rc : GetClientRect( hList, @rc )
+    dim as integer n = (rc.bottom - rc.top) \ ih
+    if n < 1 then n = 1
+    return n
+end function
+
+sub CListBox_EnsureVisible( byval pList as CLISTBOX ptr, byval modelRow as integer )
+    dim as integer vis = pList->ModelToVisible( modelRow )
+    if vis < 0 then return
+    dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
+    if hList = 0 then return
+    dim as long top = SendMessage( hList, LB_GETTOPINDEX, 0, 0 )
+    dim as integer perPage = CListBox_ItemsPerPage( pList )
+    if vis < top then
+        SendMessage( hList, LB_SETTOPINDEX, vis, 0 )
+    elseif vis >= top + perPage then
+        SendMessage( hList, LB_SETTOPINDEX, vis - perPage + 1, 0 )
+    end if
+end sub
+
+' Nearest header at or before modelRow (the group a row belongs to), or -1.
+function CListBox_ParentHeader( byval pList as CLISTBOX ptr, byval modelRow as integer ) as integer
+    for i as integer = modelRow to 0 step -1
+        if pList->rows(i).IsHeader then return i
+    next
+    return -1
+end function
+
+' Move the focus to a VISIBLE position (clamped) and apply selection per the
+' control's mode and the Shift/Ctrl modifiers, then ensure-visible and repaint.
+sub CListBox_MoveFocusVis( byval pList as CLISTBOX ptr, byval newVis as integer, byval isShift as boolean, byval isCtrl as boolean )
+    if pList->visibleCount <= 0 then return
+    if newVis < 0 then newVis = 0
+    if newVis > pList->visibleCount - 1 then newVis = pList->visibleCount - 1
+    dim as integer newModel = pList->VisibleToModel( newVis )
+    if newModel < 0 then return
+
+    pList->focusRow = newModel
+    if pList->MultipleSel then
+        ' checklist mode: arrows move focus only; Space toggles selection
+    elseif pList->ExtendSel then
+        if isShift then
+            dim as integer anchor = pList->anchorRow
+            if anchor < 0 then anchor = newModel
+            pList->ClearSelection()
+            pList->SelectRange( anchor, newModel )
+        elseif isCtrl then
+            ' Ctrl: move focus only
+        else
+            pList->SelectOnly( newModel )
+            pList->anchorRow = newModel
+        end if
+    else
+        pList->SelectOnly( newModel )
+        pList->anchorRow = newModel
+    end if
+
+    CListBox_EnsureVisible( pList, newModel )
+    dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
+    if hList then InvalidateRect( hList, NULL, FALSE )
+end sub
+
+' Left arrow: collapse an expanded header, or (from an item) jump to its header.
+sub CListBox_KeyLeft( byval pList as CLISTBOX ptr )
+    dim as integer f = pList->focusRow
+    if pList->IsValidRow(f) = false then return
+    if pList->rows(f).IsHeader then
+        if pList->rows(f).bCollapsed = false then
+            pList->rows(f).bCollapsed = true
+            pList->NotifyChange()
+            CListBox_EnsureVisible( pList, f )
+        end if
+    else
+        dim as integer h = CListBox_ParentHeader( pList, f )
+        if h >= 0 then
+            pList->focusRow  = h
+            pList->SelectOnly( h )
+            pList->anchorRow = h
+            CListBox_EnsureVisible( pList, h )
+            dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
+            if hList then InvalidateRect( hList, NULL, FALSE )
+        end if
+    end if
+end sub
+
+' Right arrow: expand a collapsed header, or (from an expanded header) step in.
+sub CListBox_KeyRight( byval pList as CLISTBOX ptr )
+    dim as integer f = pList->focusRow
+    if pList->IsValidRow(f) = false then return
+    if pList->rows(f).IsHeader = false then return
+    if pList->rows(f).bCollapsed then
+        pList->rows(f).bCollapsed = false
+        pList->NotifyChange()
+        CListBox_EnsureVisible( pList, f )
+    else
+        dim as integer curVis = pList->ModelToVisible( f )
+        CListBox_MoveFocusVis( pList, curVis + 1, false, false )
+    end if
+end sub
+
+' Space: toggle the focus row's selection (multi/extended) or select it (single).
+sub CListBox_KeySpace( byval pList as CLISTBOX ptr, byval isCtrl as boolean )
+    dim as integer f = pList->focusRow
+    if pList->IsValidRow(f) = false then return
+    if pList->MultipleSel orelse pList->ExtendSel then
+        pList->SetRowSelected( f, not pList->IsRowSelected(f) )
+    else
+        pList->SelectOnly( f )
+    end if
+    pList->anchorRow = f
+    dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
+    if hList then InvalidateRect( hList, NULL, FALSE )
+end sub
+
+
+' ========================================================================================
+' CListBoxListBox_SubclassProc
 ' ========================================================================================
 function CListBoxListBox_SubclassProc ( _
             byval hWin   as HWND, _                 ' // Control window handle
@@ -630,7 +894,7 @@ function CListBoxListBox_SubclassProc ( _
     select case uMsg
         ' Prepare the Callback MessageInfo structure for only the messages that we handle
         case WM_MOUSEWHEEL, WM_MOUSEMOVE, WM_MOUSEHOVER, WM_MOUSELEAVE, _
-             WM_RBUTTONDOWN, WM_LBUTTONUP, WM_LBUTTONDBLCLK
+             WM_LBUTTONDOWN, WM_RBUTTONDOWN, WM_LBUTTONUP, WM_LBUTTONDBLCLK
             with m
                 .hList   = hWin
                 .uMsg    = uMsg
@@ -643,9 +907,41 @@ function CListBoxListBox_SubclassProc ( _
     end select
    
     select case uMsg
+        case WM_KEYDOWN
+            if pList then
+                dim as boolean isShift = (GetAsyncKeyState(VK_SHIFT) and &H8000)
+                dim as boolean isCtrl  = (GetAsyncKeyState(VK_CONTROL) and &H8000)
+                dim as integer curVis  = pList->ModelToVisible( pList->focusRow )
+                if curVis < 0 then curVis = 0        ' no/hidden focus -> start at top
+                dim as integer perPage = CListBox_ItemsPerPage( pList )
+                if perPage < 1 then perPage = 1
+
+                select case _wParam
+                    case VK_UP
+                        CListBox_MoveFocusVis( pList, curVis - 1, isShift, isCtrl ) : return 0
+                    case VK_DOWN
+                        CListBox_MoveFocusVis( pList, curVis + 1, isShift, isCtrl ) : return 0
+                    case VK_PRIOR    ' PageUp
+                        CListBox_MoveFocusVis( pList, curVis - perPage, isShift, isCtrl ) : return 0
+                    case VK_NEXT     ' PageDown
+                        CListBox_MoveFocusVis( pList, curVis + perPage, isShift, isCtrl ) : return 0
+                    case VK_HOME
+                        CListBox_MoveFocusVis( pList, 0, isShift, isCtrl ) : return 0
+                    case VK_END
+                        CListBox_MoveFocusVis( pList, pList->visibleCount - 1, isShift, isCtrl ) : return 0
+                    case VK_LEFT
+                        CListBox_KeyLeft( pList ) : return 0
+                    case VK_RIGHT
+                        CListBox_KeyRight( pList ) : return 0
+                    case VK_SPACE
+                        CListBox_KeySpace( pList, isCtrl ) : return 0
+                end select
+            end if
+            ' unhandled keys fall through to the default listbox handler
+
         Case WM_MOUSEWHEEL
             if pList then
-                ' accumulate delta until scroll one line (up +120, down -120). 
+                ' accumulate delta until scroll one line (up +120, down -120).
                 ' 120 is the Microsoft default delta
                 dim as long zDelta = GET_WHEEL_DELTA_WPARAM( _wParam )
                 dim as long nTopIndex = SendMessage( hWin, LB_GETTOPINDEX, 0, 0 ) 
@@ -694,6 +990,9 @@ function CListBoxListBox_SubclassProc ( _
                         InvalidateRect( hWin, @rc, FALSE )
                     end if
                     pList->nLastHotIdx = idx
+                    ' Row changed: pop the current tip so it re-queries
+                    ' TTN_GETDISPINFOW for the new row on the next hover.
+                    if pList->hTooltip then SendMessage( pList->hTooltip, TTM_POP, 0, 0 )
                 end if
             end if
             if pList andalso pList->MessageCallback then
@@ -718,21 +1017,41 @@ function CListBoxListBox_SubclassProc ( _
         case WM_MOUSELEAVE
             if pList then
                 pList->nLastHotIdx = -1
-                pList->wszTooltip = ""
-                ' hWin is the child listbox (the subclass target) -- the correct
-                ' handle for the tooltip tool, matching how it was registered.
-                AfxSetTooltipText( pList->hTooltip, hWin, "" )
+                ' The tooltip hides itself when the mouse leaves the tool; nothing
+                ' to push. Just clear the hot row and repaint.
                 AfxRedrawWindow(hWin)
                 if (pList->MessageCallback <> 0) andalso pList->MessageCallback( @m ) then return 0
             end if
             
 
+        case WM_LBUTTONDOWN
+            dim as long idx = Listbox_ItemFromPoint( hWin, GET_X_LPARAM(_lParam), GET_Y_LPARAM(_lParam))
+            if pList andalso hiword(idx) <> 1 then
+                dim as integer modelRow = pList->VisibleToModel( idx )
+                m.idx = modelRow
+                dim as CLISTBOX_ROWINFO ptr pRow = pList->GetRow( modelRow )
+                if (pRow <> 0) andalso pRow->IsHeader then
+                    ' Header: clicking toggles the group collapse and deliberately
+                    ' leaves the selection untouched (a fold gesture, not a select).
+                    pRow->bCollapsed = not pRow->bCollapsed
+                    pList->NotifyChange()
+                else
+                    ' Item: apply the mouse selection to the model.
+                    CListBox_ApplyClickSelection( pList, modelRow, m.isCtrl, m.isShift )
+                end if
+                if pList->MessageCallback then
+                    if pList->MessageCallback( @m ) then return 0
+                end if
+            end if
+            ' fall through to DefSubclassProc so the listbox takes keyboard focus
+
+
         case WM_RBUTTONDOWN, _
              WM_LBUTTONUP, _
-             WM_LBUTTONDBLCLK 
-            dim as long idx = Listbox_ItemFromPoint( hWin, GET_X_LPARAM(_lParam), GET_Y_LPARAM(_lParam)) 
-            ' The return value contains the index of the nearest item in the LOWORD. The HIWORD is zero 
-            ' if the specified point is in the client area of the list box, or one if it is outside the 
+             WM_LBUTTONDBLCLK
+            dim as long idx = Listbox_ItemFromPoint( hWin, GET_X_LPARAM(_lParam), GET_Y_LPARAM(_lParam))
+            ' The return value contains the index of the nearest item in the LOWORD. The HIWORD is zero
+            ' if the specified point is in the client area of the list box, or one if it is outside the
             ' client area.
             if hiword(idx) <> 1 then
                 ' idx is a VISIBLE index; the callback sees MODEL indices.
@@ -769,6 +1088,38 @@ end function
 
 
 ' ========================================================================================
+' Create a tooltip that pulls its text on demand (LPSTR_TEXTCALLBACK) for the whole
+' listbox. Notifications (TTN_GETDISPINFOW) go to the tool's owner = the parent form,
+' which answers them in CListBox_WndProc using the current hot row.
+' ========================================================================================
+function CListBox_AddTooltip( byval hCtrl as HWND ) as HWND
+    if IsWindow(hCtrl) = 0 then return 0
+    dim as HWND hTooltip = CreateWindowExW( 0, "tooltips_class32", "", _
+                                            WS_POPUP or TTS_ALWAYSTIP, _
+                                            0, 0, 0, 0, NULL, NULL, NULL, NULL )
+    if hTooltip = 0 then return 0
+    SetWindowPos( hTooltip, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE or SWP_NOSIZE or SWP_NOACTIVATE )
+
+    dim tti as TOOLINFOW
+    ' cbSize must match the running comctl32 version (see AfxNova AfxAddTooltip).
+    #ifdef __FB_64BIT__
+        if AfxComCtlVersion < 600 then tti.cbSize = 64 else tti.cbSize = 72
+    #else
+        if AfxComCtlVersion < 600 then tti.cbSize = 44 else tti.cbSize = 48
+    #endif
+    ' hCtrl is a WS_CHILD (the listbox): register the whole control as one tool
+    ' owned by the parent form, and let the tooltip auto-relay via TTF_SUBCLASS.
+    tti.uFlags   = TTF_IDISHWND or TTF_SUBCLASS
+    tti.hwnd     = GetParent(hCtrl)
+    tti.uId      = cast(UINT_PTR, hCtrl)
+    tti.hinst    = GetModuleHandleW(NULL)
+    tti.lpszText = LPSTR_TEXTCALLBACK
+    SendMessageW( hTooltip, TTM_ADDTOOLW, 0, cast(LPARAM, @tti) )
+    return hTooltip
+end function
+
+
+' ========================================================================================
 ' CListBox_Create
 ' ========================================================================================
 function CListBox_Create( byval hWndParent as HWND, byval CtrlID as integer ) as HWND
@@ -801,7 +1152,7 @@ function CListBox_Create( byval hWndParent as HWND, byval CtrlID as integer ) as
         LBS_OWNERDRAWFIXED or LBS_NODATA or LBS_NOTIFY, _
         WS_EX_LEFT or WS_EX_RIGHTSCROLLBAR)
         pWindow->SetControlSubclass( hList, @CListBoxListBox_SubclassProc, pList->idc_ListBox, @pWindow )
-    pList->hTooltip = AfxAddTooltip( hList, "", false, false )
+    pList->hTooltip = CListBox_AddTooltip( hList )
 
     function = hForm
     
