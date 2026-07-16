@@ -55,8 +55,16 @@ Goal: two instances on screen behave independently; existing API is correct. No 
   pick one convention (recommend `true` = success) and apply it across the API.
 - **Clarify the handle.** The public `hListControl` param is actually the parent form handle.
   Rename/document, or introduce an opaque handle type, so callers aren't misled.
+- **Fix divide-by-zero in `GetListBoxEmptyClientArea`** (CListBox.inc:32). `ItemsPerPage` is
+  computed as `rc.bottom \ itemHeight` *before* the `NumItems > 0` guard; on an empty list
+  `LB_GETITEMRECT(0)` fails, `itemHeight = 0`, and the integer divide crashes. Currently masked
+  only because `Refresh()` hides the listbox when empty (CListBox.inc:60) — fragile. That line-32
+  assignment is also dead code (overwritten at line 37): drop the initializer (`dim as long
+  ItemsPerPage`), which removes the crash *and* makes the empty-list path correctly return the
+  full client rect (whole background painted), so the hide-when-empty hack is no longer required.
 
-Test: side-by-side two-instance harness; hover/selection in one must not affect the other.
+Test: side-by-side two-instance harness; hover/selection in one must not affect the other; an
+empty listbox that is visible erases cleanly (no crash) instead of relying on being hidden.
 
 ---
 
@@ -71,6 +79,14 @@ Goal: one source of truth; support insert/delete/clear; support collapsible grou
 - **Flat grouping (one level).** A row is either a header or an item; items belong to the nearest
   preceding header (or to an implicit top-level group if none). No nested headers. Collapsing a
   header hides its direct child items only. This keeps the model/view map a simple linear scan.
+  - **Uniform row height required.** The empty-area calc in `GetListBoxEmptyClientArea` (and the
+    whole `LBS_OWNERDRAWFIXED` approach) assumes every row — headers included — is the same fixed
+    height. Keep header rows the same height as items. Taller headers would force
+    `LBS_OWNERDRAWVARIABLE` and a rewrite of the empty-area math to sum actual row heights.
+- **Repaint the vacated region on shrink.** When rows are deleted or a header is collapsed, the
+  visible count drops and the now-empty lower region must be erased. Ensure the count-change /
+  `Refresh` path forces a redraw **with** background erase (so `WM_ERASEBKGND` →
+  `GetListBoxEmptyClientArea` runs) over the vacated area, or stale rows linger.
 - **Single source of truth for count.** Derive the listbox count from the model/view; never let
   the `rows()` ubound and the listbox count drift (today `AddRow` maintains both, CListBox.inc:69-76).
 - **Add operations:** `Clear/Reset`, `InsertRow`, `DeleteRow`, plus header/group rows using the
@@ -113,9 +129,25 @@ Goal: the visual + input model tiko needs.
 - **Full keyboard nav** in the subclass `WM_KEYDOWN`: Up/Down, PageUp/PageDown, Home/End with
   ensure-visible; Left/Right to collapse/expand header rows; Space / Ctrl+click / Shift+click for
   multi-select; optional type-to-search.
+- **Hot-tracking: single source of truth.** The current design decides "hot" twice — `nLastIdx`
+  drives which rows to invalidate on `WM_MOUSEMOVE` (CListBox.inc:466-495), while the hot *look*
+  is re-derived at paint time via `isMouseOverRECT` (a `GetCursorPos`+`MapWindowPoints`+`PtInRect`
+  per row, per paint) in `WM_DRAWITEM` (CListBox.inc:340). Unify these:
+  - Store the hovered index on the instance as `pList->nHotIdx` (fixing the shared-`static`
+    multi-instance bug from Phase 1 at the same time), set it where `nLastIdx` is set today.
+  - In `CListBox_OnDrawItem`, compute `isHot = (lpdis->itemID = pList->nHotIdx)` and drop the
+    `isMouseOverRECT` call. Removes the per-row cursor hit-test and a paint-time race where the
+    cursor can lag the invalidation. `WM_MOUSELEAVE` then just sets `nHotIdx = -1` and repaints.
+  - Guard the `-1` case before `ListBox_GetItemRect(hWin, nLastIdx, ...)` (right after a leave,
+    `nLastIdx = -1` fails the call and leaves a stale rect that gets invalidated twice).
+  - Pass `FALSE` (no erase) to `InvalidateRect` for the row rects — the double-buffer fully
+    repaints the row and `WM_ERASEBKGND` is swallowed, so an erase cycle is wasted work.
+  - **Verify (runtime):** with fewer rows than fill the client (`LBS_NOINTEGRALHEIGHT` leaves
+    blank space below the last row), confirm hovering that blank area reports HIWORD=1 and does
+    not leave the last row stuck hot. Add an explicit `GetCount()` bounds check if it does.
 
 Test: keyboard-only navigation reaches every row; multi-select count matches; selection survives
-collapse/expand.
+collapse/expand; hovering blank space below the last row clears the hot state.
 
 ---
 
@@ -128,6 +160,12 @@ collapse/expand.
   (CListBox.inc:452), and preserve the delta remainder rather than resetting to 0.
 - **Fix `ClassStyle` timing/comment.** It's set after `Create` with a comment that misdescribes
   `CS_DBLCLKS` (CListBox.inc:572-573). Set it correctly at creation and fix the comment.
+- **Harden `GetListBoxEmptyClientArea` height source.** Derive row height from `LB_GETITEMHEIGHT`
+  (or the stored `pList->RowHeight`, DPI-scaled) instead of `LB_GETITEMRECT(0)` (CListBox.inc:29-30),
+  which fails when item 0 doesn't exist. Use integer `\` at line 37 instead of `/` (float→long
+  rounding) to state intent, and update the stale "mod of lineheight / partial line" comments
+  (CListBox.inc:24-26, 537-539) — `LBS_NOINTEGRALHEIGHT` already draws the partial bottom row via
+  owner-draw, so there is no partial-line gap to special-case.
 
 ---
 
