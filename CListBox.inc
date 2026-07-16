@@ -464,6 +464,38 @@ end function
 
 
 ' ========================================================================================
+' Owner-drawn vertical scrollbar. The control creates, positions, auto-hides and drives
+' it; these just expose it for appearance tweaks.
+' ========================================================================================
+function CListBox_GetScrollBar( byval hListControl as HWND ) as HWND
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return 0
+    return pList->hScrollBar
+end function
+
+' Width in unscaled units; it is DPI-scaled when the control is laid out.
+sub CListBox_SetScrollBarWidth( byval hListControl as HWND, byval nWidth as integer )
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return
+    if nWidth < 1 then nWidth = 1
+    pList->ScrollBarWidth = nWidth
+    CListBox_PositionWindows( pList->hWin )
+end sub
+
+sub CListBox_SetScrollBarColors( byval hListControl as HWND, byval backclr as COLORREF, byval foreclr as COLORREF, byval foreclrhot as COLORREF )
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return
+    if pList->hScrollBar then CVScrollBar_SetColors( pList->hScrollBar, backclr, foreclr, foreclrhot )
+end sub
+
+sub CListBox_SetScrollBarPaintCallback( byval hListControl as HWND, byval usersub as VScrollPaintCallbackSub )
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return
+    if pList->hScrollBar then CVScrollBar_SetPaintCallback( pList->hScrollBar, usersub )
+end sub
+
+
+' ========================================================================================
 ' Retrieve the background color from the custom listbox control.
 ' ========================================================================================
 function CListBox_GetBackColor( byval hListControl as HWND ) as COLORREF
@@ -511,18 +543,77 @@ end sub
 function CListBox_PositionWindows( byval hwnd as HWND ) as LRESULT
     dim as CLISTBOX ptr pList = GetListBoxPointer(hwnd)
     if pList = null then return 0
- 
+
     ' Get the entire client area
     dim as Rect rc
     GetClientRect( hwnd, @rc )
 
+    ' Reserve a strip on the right edge for the scrollbar, but only while it is shown
+    ' (auto-hide gives the width back to the listbox).
+    dim as integer sbW = 0
+    if (pList->hScrollBar <> 0) andalso pList->scrollBarShown then
+        sbW = pList->ScrollBarWidth
+        dim pWindow as CWindow ptr = AfxCWindowPtr( hwnd )
+        if pWindow then sbW = pWindow->ScaleX( pList->ScrollBarWidth )
+    end if
+
     dim as HWND hListbox = GetDlgItem( hwnd, pList->idc_ListBox )
     SetWindowPos( hListbox, 0, _
-                    rc.left, rc.top, rc.right-rc.left, rc.bottom-rc.top, _
+                    rc.left, rc.top, (rc.right - rc.left) - sbW, rc.bottom - rc.top, _
                     SWP_NOZORDER )
+
+    if (pList->hScrollBar <> 0) andalso (sbW > 0) then
+        SetWindowPos( pList->hScrollBar, 0, _
+                        rc.right - sbW, rc.top, sbW, rc.bottom - rc.top, _
+                        SWP_NOZORDER )
+    end if
 
     function = 0
 end function
+
+
+' ========================================================================================
+' The scrollbar reports that the user scrolled: move the listbox to that top row.
+' ========================================================================================
+sub CListBox_OnScrollBarScroll( byval hSB as HWND, byval newPos as integer )
+    ' the scrollbar is a child of the CListBox container window
+    dim as CLISTBOX ptr pList = GetListBoxPointer( GetParent(hSB) )
+    if pList = 0 then return
+    dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
+    if hList = 0 then return
+    SendMessage( hList, LB_SETTOPINDEX, newPos, 0 )
+    ' The listbox clamps for itself; mirror whatever it actually did so the thumb can
+    ' never show a position the list isn't at. SetPos does not re-enter the callback.
+    dim as integer actual = SendMessage( hList, LB_GETTOPINDEX, 0, 0 )
+    if actual <> newPos then CVScrollBar_SetPos( hSB, actual )
+end sub
+
+
+' ========================================================================================
+' Push the current model + scroll position into the scrollbar and apply the auto-hide
+' decision. Called from every path that can change the row count or the top row, which
+' is what stops the thumb ever going stale.
+' ========================================================================================
+sub CListBox_SyncScrollBar( byval pList as CLISTBOX ptr )
+    if pList = 0 then return
+    if pList->hScrollBar = 0 then return
+    dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
+    if hList = 0 then return
+
+    CVScrollBar_SetRange( pList->hScrollBar, _
+                          pList->visibleCount, _
+                          CListBox_ItemsPerPage( pList ), _
+                          SendMessage( hList, LB_GETTOPINDEX, 0, 0 ) )
+
+    ' Auto-hide. This only changes the listbox WIDTH, while items-per-page depends on
+    ' HEIGHT, so the decision cannot feed back on itself and oscillate.
+    dim as boolean needed = CVScrollBar_NeedsThumb( pList->hScrollBar )
+    if needed <> pList->scrollBarShown then
+        pList->scrollBarShown = needed
+        ShowWindow( pList->hScrollBar, iif( needed, SW_SHOW, SW_HIDE ) )
+        CListBox_PositionWindows( pList->hWin )   ' listbox reclaims / gives up the strip
+    end if
+end sub
 
 
 ' ========================================================================================
@@ -537,6 +628,8 @@ function CListBox_OnSize( _
     if state <> SIZE_MINIMIZED then
         ' Position all of the child windows
         CListBox_PositionWindows( hwnd )
+        ' Height changed -> items-per-page changed -> scrollbar range changed
+        CListBox_SyncScrollBar( GetListBoxPointer(hwnd) )
     end if
     function = 0
 end function
@@ -787,8 +880,10 @@ sub CListBox_EnsureVisible( byval pList as CLISTBOX ptr, byval modelRow as integ
     dim as integer perPage = CListBox_ItemsPerPage( pList )
     if vis < top then
         SendMessage( hList, LB_SETTOPINDEX, vis, 0 )
+        CListBox_SyncScrollBar( pList )
     elseif vis >= top + perPage then
         SendMessage( hList, LB_SETTOPINDEX, vis - perPage + 1, 0 )
+        CListBox_SyncScrollBar( pList )
     end if
 end sub
 
@@ -994,6 +1089,7 @@ function CListBoxListBox_SubclassProc ( _
                 if moved then
                     if nTopIndex < 0 then nTopIndex = 0
                     SendMessage( hWin, LB_SETTOPINDEX, nTopIndex, 0 )
+                    CListBox_SyncScrollBar( pList )   ' keep the thumb with the wheel
                     if (pList->MessageCallback <> 0) andalso pList->MessageCallback( @m ) then return 0
                 end if
             end if
@@ -1204,6 +1300,11 @@ function CListBox_Create( byval hWndParent as HWND, byval CtrlID as integer ) as
         WS_EX_LEFT or WS_EX_RIGHTSCROLLBAR)
         pWindow->SetControlSubclass( hList, @CListBoxListBox_SubclassProc, pList->idc_ListBox, @pWindow )
     pList->hTooltip = CListBox_AddTooltip( hList )
+
+    ' Owner-drawn vertical scrollbar, owned and driven by this control. It starts
+    ' hidden; the first Refresh/Sync decides whether there is anything to scroll.
+    pList->hScrollBar = CVScrollBar_Create( hForm, CtrlID + 1 )
+    CVScrollBar_SetScrollCallback( pList->hScrollBar, @CListBox_OnScrollBarScroll )
 
     function = hForm
     

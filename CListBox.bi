@@ -73,6 +73,12 @@ type CLISTBOX
     MultipleSel     as boolean = false
     BackColor       as COLORREF
     hFont           as HFONT              ' caller-supplied font for row text (caller owns it)
+    ' --- Owner-drawn vertical scrollbar, created and driven by this control. It is
+    '     auto-hidden whenever the visible rows fit, and the listbox then reclaims the
+    '     full client width. ---
+    hScrollBar      as HWND
+    ScrollBarWidth  as integer = CVSCROLL_DEFAULT_WIDTH   ' DPI-scaled when laid out
+    scrollBarShown  as boolean = false
     PaintCallback   as PaintCallbackSub
     MessageCallback as MessageCallbackFunc
     TooltipCallback as TooltipCallbackFunc    ' optional; defaults to the row's Text
@@ -109,6 +115,12 @@ type CLISTBOX
     declare sub      NotifyChange()
     declare sub      Refresh()
 end type
+
+' Defined in CListBox.inc, but CLISTBOX.Refresh (below) has to call it -- push the
+' scrollbar's range/visibility to match the current model + scroll position.
+declare sub      CListBox_SyncScrollBar( byval pList as CLISTBOX ptr )
+declare function CListBox_ItemsPerPage( byval pList as CLISTBOX ptr ) as integer
+declare function CListBox_PositionWindows( byval hwnd as HWND ) as LRESULT
 
 destructor CLISTBOX()
     this.FreeCache()
@@ -314,6 +326,9 @@ sub CLISTBOX.Refresh()
     ' Repaint WITH background erase so the vacated region below the last row is
     ' cleared when the list shrinks (delete / collapse).
     InvalidateRect( hList, NULL, TRUE )
+    ' The visible row count may have changed, so the scrollbar range (and whether it
+    ' is needed at all) has to follow.
+    CListBox_SyncScrollBar( @this )
 end sub
 
 
@@ -357,6 +372,10 @@ declare function CListBox_GetRowHeight( byval hListControl as HWND ) as integer
 declare function CListBox_SetRowHeight( byval hListControl as HWND, byval height as integer ) as integer
 declare function CListBox_GetFont( byval hListControl as HWND ) as HFONT
 declare function CListBox_SetFont( byval hListControl as HWND, byval hFont as HFONT ) as boolean
+declare function CListBox_GetScrollBar( byval hListControl as HWND ) as HWND
+declare sub      CListBox_SetScrollBarWidth( byval hListControl as HWND, byval nWidth as integer )
+declare sub      CListBox_SetScrollBarColors( byval hListControl as HWND, byval backclr as COLORREF, byval foreclr as COLORREF, byval foreclrhot as COLORREF )
+declare sub      CListBox_SetScrollBarPaintCallback( byval hListControl as HWND, byval usersub as VScrollPaintCallbackSub )
 declare function CListBox_GetCount( byval hListControl as HWND ) as integer
 declare function CListBox_SetMessageCallback( byval hListControl as HWND, byval userfunc as MessageCallbackFunc ) as boolean
 declare sub      CListBox_SetHoverTime( byval hListControl as HWND, byval milliseconds as integer )

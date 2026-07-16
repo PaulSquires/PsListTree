@@ -227,6 +227,10 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
     CListBox_SetFont( HWND_FRMEXPLORER, ghFont(GUIFONT_10) )
     CListBox_SetTooltipCallback( HWND_FRMEXPLORER, @CListBox_TooltipCallback )
     CListBox_SetExtendedSelect( HWND_FRMEXPLORER, true )   ' Shift/Ctrl range selection
+    ' The scrollbar is created/positioned/auto-hidden by the control; we only theme it.
+    ' (CListBox_SetScrollBarPaintCallback is available for full custom drawing.)
+    CListBox_SetScrollBarColors( HWND_FRMEXPLORER, theme.BackColorScrollBar, _
+                                 theme.ForeColorScrollBar, theme.ForeColorScrollBarHot )
     ' Two groups; bulk add is batched so the map rebuilds once, not per row.
     CListBox_BeginUpdate( HWND_FRMEXPLORER )
     CListBox_AddHeader( HWND_FRMEXPLORER, "Group Alpha" )
@@ -252,6 +256,8 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
     CListBox_SetBackColor( HWND_FRMEXPLORER2, theme.BackColor )
     CListBox_SetFont( HWND_FRMEXPLORER2, ghFont(GUIFONT_10) )
     CListBox_SetTooltipCallback( HWND_FRMEXPLORER2, @CListBox_TooltipCallback )
+    CListBox_SetScrollBarColors( HWND_FRMEXPLORER2, theme.BackColorScrollBar, _
+                                 theme.ForeColorScrollBar, theme.ForeColorScrollBarHot )
     CListBox_BeginUpdate( HWND_FRMEXPLORER2 )
     CListBox_AddHeader( HWND_FRMEXPLORER2, "Files" )              ' model row 0
     for i as integer = 0 to 4
