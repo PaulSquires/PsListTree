@@ -60,7 +60,141 @@ function CListBox_AddString( byval hListControl as HWND, byval Text as DWSTRING,
     if pRow = null then return -1
     pRow->Text = Text
     pRow->itemData = itemData
-    return pList->GetCount() - 1  ' ensure zero based
+    return pList->GetCount() - 1  ' model index of the appended row
+end function
+
+
+' ========================================================================================
+' Append a header (group) row. Child items added after it belong to this group
+' until the next header. Returns the header's model index.
+' ========================================================================================
+function CListBox_AddHeader( byval hListControl as HWND, byval Text as DWSTRING, byval itemData as integer = 0 ) as integer
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return -1
+    dim as CLISTBOX_ROWINFO ptr pRow = pList->AddRow()
+    if pRow = null then return -1
+    pRow->IsHeader = true
+    pRow->Text = Text
+    pRow->itemData = itemData
+    return pList->GetCount() - 1
+end function
+
+
+' ========================================================================================
+' Insert a row at the given MODEL index (existing rows shift down). Returns the
+' actual index used (clamped to [0, count]), or -1 on failure.
+' ========================================================================================
+function CListBox_InsertString( byval hListControl as HWND, byval row as integer, byval Text as DWSTRING, byval itemData as integer = 0 ) as integer
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return -1
+    dim as integer at = row
+    if at < 0 then at = 0
+    if at > pList->GetCount() then at = pList->GetCount()
+    dim as CLISTBOX_ROWINFO ptr pRow = pList->InsertRowAt( at )
+    if pRow = null then return -1
+    pRow->Text = Text
+    pRow->itemData = itemData
+    return at
+end function
+
+
+' ========================================================================================
+' Delete the row at the given MODEL index. Returns TRUE on success.
+' ========================================================================================
+function CListBox_DeleteString( byval hListControl as HWND, byval row as integer ) as boolean
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return false
+    return pList->DeleteRowAt( row )
+end function
+
+
+' ========================================================================================
+' Remove all rows from the control.
+' ========================================================================================
+sub CListBox_Clear( byval hListControl as HWND )
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return
+    pList->Clear()
+end sub
+
+
+' ========================================================================================
+' Row type / collapse queries and operations. Collapse/Expand/Toggle only act on
+' header rows (return FALSE for non-headers or invalid rows).
+' ========================================================================================
+function CListBox_IsHeader( byval hListControl as HWND, byval row as integer ) as boolean
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return false
+    dim as CLISTBOX_ROWINFO ptr pRow = pList->GetRow( row )
+    if pRow = null then return false
+    return pRow->IsHeader
+end function
+
+function CListBox_IsCollapsed( byval hListControl as HWND, byval row as integer ) as boolean
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return false
+    dim as CLISTBOX_ROWINFO ptr pRow = pList->GetRow( row )
+    if pRow = null then return false
+    return pRow->bCollapsed
+end function
+
+function CListBox_CollapseRow( byval hListControl as HWND, byval row as integer ) as boolean
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return false
+    dim as CLISTBOX_ROWINFO ptr pRow = pList->GetRow( row )
+    if (pRow = null) orelse (pRow->IsHeader = false) then return false
+    if pRow->bCollapsed = false then
+        pRow->bCollapsed = true
+        pList->NotifyChange()
+    end if
+    return true
+end function
+
+function CListBox_ExpandRow( byval hListControl as HWND, byval row as integer ) as boolean
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return false
+    dim as CLISTBOX_ROWINFO ptr pRow = pList->GetRow( row )
+    if (pRow = null) orelse (pRow->IsHeader = false) then return false
+    if pRow->bCollapsed then
+        pRow->bCollapsed = false
+        pList->NotifyChange()
+    end if
+    return true
+end function
+
+function CListBox_ToggleRow( byval hListControl as HWND, byval row as integer ) as boolean
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return false
+    dim as CLISTBOX_ROWINFO ptr pRow = pList->GetRow( row )
+    if (pRow = null) orelse (pRow->IsHeader = false) then return false
+    pRow->bCollapsed = not pRow->bCollapsed
+    pList->NotifyChange()
+    return true
+end function
+
+
+' ========================================================================================
+' Batch multiple model changes into a single visible-map rebuild + repaint. Wrap
+' bulk inserts in BeginUpdate/EndUpdate to keep loading O(n) instead of O(n^2).
+' ========================================================================================
+sub CListBox_BeginUpdate( byval hListControl as HWND )
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList then pList->BeginUpdate()
+end sub
+
+sub CListBox_EndUpdate( byval hListControl as HWND )
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList then pList->EndUpdate()
+end sub
+
+
+' ========================================================================================
+' Number of currently visible rows (headers + non-collapsed items).
+' ========================================================================================
+function CListBox_GetVisibleCount( byval hListControl as HWND ) as integer
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return 0
+    return pList->GetVisibleCount()
 end function
 
 
@@ -169,22 +303,29 @@ end function
 
 
 ' ========================================================================================
-' Retrieve the current selected row from the custom listbox control.
+' Retrieve the current selected row (MODEL index) from the custom listbox control.
+' Returns -1 if there is no selection.
 ' ========================================================================================
 function CListBox_GetCurSel( byval hListControl as HWND ) as integer
     dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return -1
-    return ListBox_GetCurSel( GetDlgItem( pList->hWin, pList->idc_ListBox ) )
+    ' The listbox tracks selection by VISIBLE index; translate back to the model.
+    dim as integer visSel = ListBox_GetCurSel( GetDlgItem( pList->hWin, pList->idc_ListBox ) )
+    return pList->VisibleToModel( visSel )
 end function
 
 
 ' ========================================================================================
-' Set the current selected row for the custom listbox control.
+' Set the current selected row by MODEL index. If the row is currently hidden
+' (under a collapsed header) the selection is cleared. Returns the model row
+' selected, or -1 if it was not visible.
 ' ========================================================================================
 function CListBox_SetCurSel( byval hListControl as HWND, byval row as integer ) as integer
     dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return -1
-    return ListBox_SetCurSel( GetDlgItem( pList->hWin, pList->idc_ListBox ), row )
+    dim as integer visRow = pList->ModelToVisible( row )
+    ListBox_SetCurSel( GetDlgItem( pList->hWin, pList->idc_ListBox ), visRow )
+    return iif( visRow >= 0, row, -1 )
 end function
 
 
@@ -394,13 +535,23 @@ function CListBox_OnDrawItem( _
         dim as RECT rc
         SetRect( @rc, 0, 0, b.rcClientWidth, b.rcClientHeight )
 
+        ' lpdis->itemID is the VISIBLE (listbox) index; translate to the model row.
+        dim as integer modelRow = pList->VisibleToModel( lpdis->itemID )
+        dim as CLISTBOX_ROWINFO ptr pRow = pList->GetRow( modelRow )
+
         dim as CLISTBOX_PAINTINFO p
         with p
-            .itemID     = lpdis->itemID
-            .b          = @b
-            .rc         = rc
-            .isHot      = isHot
-            .wszCaption = CListBox_GetText( hwnd, lpdis->ItemID )
+            .itemID      = modelRow
+            .b           = @b
+            .rc          = rc
+            .isHot       = isHot
+            .isHeader    = false
+            .isCollapsed = false
+            if pRow then
+                .isHeader    = pRow->IsHeader
+                .isCollapsed = pRow->bCollapsed
+                .wszCaption  = pRow->Text
+            end if
         end with
 
         if pList->PaintCallback then pList->PaintCallback( @p )
@@ -549,7 +700,8 @@ function CListBoxListBox_SubclassProc ( _
             ' if the specified point is in the client area of the list box, or one if it is outside the 
             ' client area.
             if hiword(idx) <> 1 then
-                m.idx = idx
+                ' idx is a VISIBLE index; the callback sees MODEL indices.
+                if pList then m.idx = pList->VisibleToModel( idx )
                 if pList andalso pList->MessageCallback then
                     if pList->MessageCallback( @m ) then return 0
                 end if
@@ -576,7 +728,8 @@ function CListBoxListBox_SubclassProc ( _
             ' if the specified point is in the client area of the list box, or one if it is outside the 
             ' client area.
             if hiword(idx) <> 1 then
-                m.idx = idx
+                ' idx is a VISIBLE index; the callback sees MODEL indices.
+                if pList then m.idx = pList->VisibleToModel( idx )
                 if pList andalso pList->MessageCallback then
                     if pList->MessageCallback( @m ) then return 0
                 end if
