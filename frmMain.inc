@@ -169,9 +169,11 @@ function CListBox_MessageCallback( byval m as CLISTBOX_MESSAGEINFO ptr ) as bool
             
         case WM_LBUTTONUP
             print "WM_LBUTTONUP on idx: "; m->idx
-            ' Header collapse/expand is now handled inside the control on the
-            ' mouse-down, and it preserves the current selection.
-            return true
+            ' Header collapse/expand is handled inside the control on the mouse-down,
+            ' and it preserves the current selection. Return FALSE: the listbox needs
+            ' its default WM_LBUTTONUP handling to release the mouse capture it took
+            ' on the button-down.
+            return false
     
     end select
 
@@ -210,7 +212,7 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
 
     HWND_FRMMAIN = pWindow->Create( _
             null, APPNAME, @frmMain_WndProc, _
-            100, 100, 800, 600 _
+            100, 100, 800, 400 _
             )
 
     dim as RECT rc: GetClientRect( HWND_FRMMAIN, @rc )

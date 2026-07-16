@@ -1191,8 +1191,24 @@ function CListBoxListBox_SubclassProc ( _
             ' fall through to DefSubclassProc so the listbox takes keyboard focus
 
 
+        case WM_LBUTTONUP
+            dim as long idx = Listbox_ItemFromPoint( hWin, GET_X_LPARAM(_lParam), GET_Y_LPARAM(_lParam))
+            if hiword(idx) <> 1 then
+                ' idx is a VISIBLE index; the callback sees MODEL indices.
+                if pList then m.idx = pList->VisibleToModel( idx )
+                if pList andalso pList->MessageCallback then
+                    ' Notify, but deliberately IGNORE the "handled" result here: we must
+                    ' always fall through to DefSubclassProc. The listbox captures the
+                    ' mouse in its default WM_LBUTTONDOWN handling and only releases it
+                    ' in its default WM_LBUTTONUP handling. Swallowing this message leaks
+                    ' the capture, so every later click is routed to the listbox instead
+                    ' of its siblings -- e.g. the scrollbar would need a throwaway first
+                    ' click before a drag would start.
+                    pList->MessageCallback( @m )
+                end if
+            end if
+
         case WM_RBUTTONDOWN, _
-             WM_LBUTTONUP, _
              WM_LBUTTONDBLCLK
             dim as long idx = Listbox_ItemFromPoint( hWin, GET_X_LPARAM(_lParam), GET_Y_LPARAM(_lParam))
             ' The return value contains the index of the nearest item in the LOWORD. The HIWORD is zero
