@@ -3,6 +3,14 @@
 
 #include once "clsDoubleBuffer.bi"
 
+' Polling timer that guarantees hot-tracking is cleared when the mouse leaves the
+' control. WM_MOUSELEAVE (TME_LEAVE) is not reliably delivered on fast exits, so a
+' periodic cursor check acts as a safety net. Timer IDs are per-window, so every
+' instance can share this id. Value is deliberately unusual to avoid colliding with
+' any timer the standard listbox uses internally.
+#define IDT_CLISTBOX_HOTTRACK   &hCB01
+#define CLISTBOX_HOTTRACK_MS    100
+
 type CLISTBOX_PAINTINFO
     itemID          as integer                ' MODEL row index (not the visible/listbox index)
     b               as clsDoubleBuffer ptr    ' points to the caller's buffer (no copy)
@@ -58,6 +66,7 @@ type CLISTBOX
     accumDelta      as integer = 0        ' mousewheel
     HoverTime       as integer = 250
     nLastHotIdx     as integer = -1       ' last VISIBLE row the mouse was over (hover tracking)
+    hotTimerOn      as boolean = false    ' is the hot-tracking safety-net timer running?
     focusRow        as integer = -1       ' MODEL row with the keyboard focus/caret (-1 = none)
     anchorRow       as integer = -1       ' MODEL row anchoring a shift-range selection
     ExtendSel       as boolean = false

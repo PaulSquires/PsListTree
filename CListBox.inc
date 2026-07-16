@@ -747,6 +747,23 @@ end sub
 
 
 ' ========================================================================================
+' Clear any hot-tracked row and stop the safety-net timer. Repaints only if a row was
+' actually hot, so this is cheap to call repeatedly.
+' ========================================================================================
+sub CListBox_ClearHotTracking( byval pList as CLISTBOX ptr, byval hList as HWND )
+    if pList = null then return
+    if pList->hotTimerOn then
+        KillTimer( hList, IDT_CLISTBOX_HOTTRACK )
+        pList->hotTimerOn = false
+    end if
+    if pList->nLastHotIdx <> -1 then
+        pList->nLastHotIdx = -1
+        AfxRedrawWindow( hList )
+    end if
+end sub
+
+
+' ========================================================================================
 ' Keyboard-navigation helpers (all operate in MODEL space; movement is over the
 ' currently VISIBLE rows).
 ' ========================================================================================
@@ -906,6 +923,18 @@ function CListBoxListBox_SubclassProc ( _
     end select
    
     select case uMsg
+        case WM_TIMER
+            if pList andalso (_wParam = IDT_CLISTBOX_HOTTRACK) then
+                ' The cursor may have left without us getting a WM_MOUSELEAVE. If it
+                ' is no longer over our client area, clear the hot row ourselves.
+                dim as RECT rcClient : GetClientRect( hWin, @rcClient )
+                if isMouseOverRECT( hWin, rcClient ) = false then
+                    CListBox_ClearHotTracking( pList, hWin )
+                end if
+                return 0
+            end if
+            ' any other timer id falls through to the default listbox handler
+
         case WM_KEYDOWN
             if pList then
                 dim as boolean isShift = (GetAsyncKeyState(VK_SHIFT) and &H8000)
@@ -979,7 +1008,15 @@ function CListBoxListBox_SubclassProc ( _
             tme.hwndTrack = hWin
             tme.dwHoverTime = 250    ' HOVER_DEFAULT is 500
             if pList then tme.dwHoverTime = pList->HoverTime
-            TrackMouseEvent(@tme) 
+            TrackMouseEvent(@tme)
+
+            ' Safety net: WM_MOUSELEAVE is not guaranteed to arrive when the mouse
+            ' exits quickly (or onto another control), which would strand the hot row
+            ' painted. Poll the cursor while we are over the control.
+            if (pList <> 0) andalso (pList->hotTimerOn = false) then
+                SetTimer( hWin, IDT_CLISTBOX_HOTTRACK, CLISTBOX_HOTTRACK_MS, NULL )
+                pList->hotTimerOn = true
+            end if
 
             ' get the item rect that the mouse is over and only invalidate
             ' that instead of the entire listbox
@@ -1025,10 +1062,10 @@ function CListBoxListBox_SubclassProc ( _
 
         case WM_MOUSELEAVE
             if pList then
-                pList->nLastHotIdx = -1
-                ' The tooltip hides itself when the mouse leaves the tool; nothing
-                ' to push. Just clear the hot row and repaint.
-                AfxRedrawWindow(hWin)
+                ' Fast path for clearing the hot row (the WM_TIMER poll is the
+                ' fallback for when this message never arrives). The tooltip hides
+                ' itself when the mouse leaves the tool, so nothing to push.
+                CListBox_ClearHotTracking( pList, hWin )
                 if (pList->MessageCallback <> 0) andalso pList->MessageCallback( @m ) then return 0
             end if
             
@@ -1085,6 +1122,11 @@ function CListBoxListBox_SubclassProc ( _
             end if    
             
         Case WM_DESTROY
+            ' Don't let the hot-tracking timer outlive the window
+            if (pList <> 0) andalso pList->hotTimerOn then
+                KillTimer( hWin, IDT_CLISTBOX_HOTTRACK )
+                pList->hotTimerOn = false
+            end if
             ' REQUIRED: Remove control subclassing
             RemoveWindowSubclass( hWin, @CListBoxListBox_SubclassProc, uIdSubclass )
     end select
