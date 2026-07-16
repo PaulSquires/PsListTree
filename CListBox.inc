@@ -29,8 +29,11 @@ function GetListBoxEmptyClientArea( byval hListBox as HWND ) as RECT
     SendMessage( hListBox, LB_GETITEMRECT, 0, cast(LPARAM, @rcItem) )
     dim as long itemHeight = rcItem.bottom - rcItem.top
     dim as long NumItems = ListBox_GetCount(hListBox)
-    dim as long ItemsPerPage = ( rc.bottom \ itemHeight )
-    dim as long nTopIndex = SendMessage( hListBox, LB_GETTOPINDEX, 0, 0 ) 
+    ' NOTE: do NOT divide by itemHeight here -- on an empty list LB_GETITEMRECT(0)
+    ' fails and itemHeight is 0. ItemsPerPage is (re)computed below only when
+    ' NumItems > 0, so item 0 is guaranteed to exist there.
+    dim as long ItemsPerPage
+    dim as long nTopIndex = SendMessage( hListBox, LB_GETTOPINDEX, 0, 0 )
     dim as long visible_rows = 0
 
     if NumItems > 0 then
@@ -62,16 +65,17 @@ end function
 
 
 ' ========================================================================================
-' Retrieve specified row text from the custom listbox control.
+' Set specified row text in the custom listbox control. Returns TRUE on success,
+' FALSE if the row index is invalid.
 ' ========================================================================================
 function CListBox_SetText( byval hListControl as HWND, byval row as integer, byval Text as DWSTRING ) as boolean
     dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
-    if pList = null then return 0
+    if pList = null then return false
     if pList->IsValidRow(row) then
         pList->GetRow(row)->Text = Text
-        return false    ' no error
+        return true     ' success
     end if
-    return true  ' error
+    return false  ' invalid row
 end function
 
 
@@ -105,6 +109,7 @@ function CListBox_SetMessageCallback( byval hListControl as HWND, byval userfunc
     dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return false
     pList->MessageCallback = userfunc
+    return true
 end function
 
 
@@ -135,14 +140,15 @@ end sub
 ' ========================================================================================
 ' Set specified row itemData for the custom listbox control.
 ' ========================================================================================
+' Returns TRUE on success, FALSE if the row index is invalid.
 function CListBox_SetItemData( byval hListControl as HWND, byval row as integer, byval itemData as integer ) as boolean
     dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
-    if pList = null then return 0
+    if pList = null then return false
     if pList->IsValidRow(row) then
         pList->GetRow(row)->itemData = itemData
-        return false    ' no error
+        return true     ' success
     end if
-    return true  ' error
+    return false  ' invalid row
 end function
 
 
@@ -161,7 +167,9 @@ end function
 ' Retrieve the current selected row from the custom listbox control.
 ' ========================================================================================
 function CListBox_GetCurSel( byval hListControl as HWND ) as integer
-    return ListBox_GetCurSel( hListControl )    
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return -1
+    return ListBox_GetCurSel( GetDlgItem( pList->hWin, pList->idc_ListBox ) )
 end function
 
 
@@ -169,7 +177,9 @@ end function
 ' Set the current selected row for the custom listbox control.
 ' ========================================================================================
 function CListBox_SetCurSel( byval hListControl as HWND, byval row as integer ) as integer
-    return ListBox_SetCurSel( hListControl, row )    
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return -1
+    return ListBox_SetCurSel( GetDlgItem( pList->hWin, pList->idc_ListBox ), row )
 end function
 
 
@@ -190,7 +200,41 @@ function CListBox_SetRowHeight( byval hListControl as HWND, byval height as inte
     dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return -1
     pList->RowHeight = height
+    ' Apply immediately -- WM_MEASUREITEM only fires at creation, so a later change
+    ' would otherwise have no visible effect until the listbox is recreated.
+    dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
+    if hList then
+        dim as long h = height
+        dim pWindow as CWindow ptr = AfxCWindowPtr( pList->hWin )
+        if pWindow then h = pWindow->ScaleY( height )
+        SendMessage( hList, LB_SETITEMHEIGHT, 0, cast( LPARAM, h ) )
+        AfxRedrawWindow( hList )
+    end if
     return height
+end function
+
+
+' ========================================================================================
+' Retrieve the font used to paint row text.
+' ========================================================================================
+function CListBox_GetFont( byval hListControl as HWND ) as HFONT
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return 0
+    return pList->hFont
+end function
+
+
+' ========================================================================================
+' Set the font used to paint row text. The caller owns the HFONT and is responsible for
+' destroying it; the control only stores the handle.
+' ========================================================================================
+function CListBox_SetFont( byval hListControl as HWND, byval hFont as HFONT ) as boolean
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return false
+    pList->hFont = hFont
+    dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
+    if hList then AfxRedrawWindow( hList )
+    return true
 end function
 
 
@@ -335,27 +379,27 @@ function CListBox_OnDrawItem( _
         dim as clsDoubleBuffer b
 
         b.BeginDoubleBuffer(lpdis->hwndItem, lpdis->hDC, lpdis->rcItem)
+        b.SetFont( pList->hFont )    ' default row font; the paint callback may override
 
         dim as boolean isHot = false
-        if isMouseOverRECT(lpdis->hwndItem, b.rcClient) then isHot = true   
-'        if isMouseOverWindow( HWND_FRMPANEL_VSCROLLBAR ) then isHot = false
+        if isMouseOverRECT(lpdis->hwndItem, b.rcClient) then isHot = true
         if ListBox_GetSel(lpdis->hwndItem, lpdis->itemID) then isHot = true
 
         ' Create our rect that works with the entire line
         dim as RECT rc
         SetRect( @rc, 0, 0, b.rcClientWidth, b.rcClientHeight )
-        
+
         dim as CLISTBOX_PAINTINFO p
         with p
             .itemID     = lpdis->itemID
-            .b          = b
+            .b          = @b
             .rc         = rc
             .isHot      = isHot
             .wszCaption = CListBox_GetText( hwnd, lpdis->ItemID )
         end with
 
-        pList->PaintCallback( @p )
-        
+        if pList->PaintCallback then pList->PaintCallback( @p )
+
         b.EndDoubleBuffer()
 
     end if   
@@ -418,13 +462,12 @@ function CListBoxListBox_SubclassProc ( _
 
     dim pWindow as CWindow ptr = AfxCWindowPtr(hWin)
     dim as CLISTBOX ptr pList = GetListBoxPointer( GetParent(hWin) )
-        
-    static m as CLISTBOX_MESSAGEINFO 
 
-    ' keep track of last index we were over so that we only issue a 
-    ' repaint if the cursor has moved off of the line
-    static as long nLastIdx = -1
-        
+    ' Per-message scratch info passed to the user MessageCallback. A plain local
+    ' (NOT static) so that multiple control instances never share it. The hover
+    ' tracking index likewise lives per-instance in pList->nLastHotIdx.
+    dim m as CLISTBOX_MESSAGEINFO
+
     select case uMsg
         ' Prepare the Callback MessageInfo structure for only the messages that we handle
         case WM_MOUSEWHEEL, WM_MOUSEMOVE, WM_MOUSEHOVER, WM_MOUSELEAVE, _
@@ -451,14 +494,14 @@ function CListBoxListBox_SubclassProc ( _
                 if pList->accumDelta >= 120 then       ' scroll up 3 lines
                     nTopIndex = nTopIndex - 3
                     nTopIndex = max( 0, nTopIndex )
-                    SendMessage( hWin, LB_SETTOPINDEX, nTopIndex, 0 ) 
+                    SendMessage( hWin, LB_SETTOPINDEX, nTopIndex, 0 )
                     pList->accumDelta = 0
-                    if pList->MessageCallback( @m ) then return 0
+                    if (pList->MessageCallback <> 0) andalso pList->MessageCallback( @m ) then return 0
                 elseif pList->accumDelta <= -120 then  ' scroll down 3 lines
                     nTopIndex = nTopIndex + 3
-                    SendMessage( hWin, LB_SETTOPINDEX, nTopIndex, 0 ) 
+                    SendMessage( hWin, LB_SETTOPINDEX, nTopIndex, 0 )
                     pList->accumDelta = 0
-                    if pList->MessageCallback( @m ) then return 0
+                    if (pList->MessageCallback <> 0) andalso pList->MessageCallback( @m ) then return 0
                 end if
             end if
 
@@ -481,16 +524,16 @@ function CListBoxListBox_SubclassProc ( _
             ' The return value contains the index of the nearest item in the LOWORD. The HIWORD is zero 
             ' if the specified point is in the client area of the list box, or one if it is outside the 
             ' client area.
-            if hiword(idx) <> 1 then
-                if idx <> nLastIdx then
+            if pList andalso hiword(idx) <> 1 then
+                if idx <> pList->nLastHotIdx then
                     ListBox_GetItemRect( hWin, idx, @rc )
                     InvalidateRect( hWin, @rc, true )
-                    ListBox_GetItemRect( hWin, nLastIdx, @rc )
+                    ListBox_GetItemRect( hWin, pList->nLastHotIdx, @rc )
                     InvalidateRect( hWin, @rc, true )
-                    nLastIdx = idx
+                    pList->nLastHotIdx = idx
                 end if
             end if
-            if pList then 
+            if pList andalso pList->MessageCallback then
                 if pList->MessageCallback( @m ) then return 0
             end if
                         
@@ -502,19 +545,19 @@ function CListBoxListBox_SubclassProc ( _
             ' client area.
             if hiword(idx) <> 1 then
                 m.idx = idx
-                if pList then 
+                if pList andalso pList->MessageCallback then
                     if pList->MessageCallback( @m ) then return 0
                 end if
             end if
 
-            
+
         case WM_MOUSELEAVE
-            nLastIdx = -1
-            if pList then 
+            if pList then
+                pList->nLastHotIdx = -1
                 pList->wszTooltip = ""
                 AfxSetTooltipText( pList->hTooltip, pList->hWin, "" )
                 AfxRedrawWindow(hWin)
-                if pList->MessageCallback( @m ) then return 0
+                if (pList->MessageCallback <> 0) andalso pList->MessageCallback( @m ) then return 0
             end if
             
 
@@ -527,7 +570,7 @@ function CListBoxListBox_SubclassProc ( _
             ' client area.
             if hiword(idx) <> 1 then
                 m.idx = idx
-                if pList then 
+                if pList andalso pList->MessageCallback then
                     if pList->MessageCallback( @m ) then return 0
                 end if
             end if

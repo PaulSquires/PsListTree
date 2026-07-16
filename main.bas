@@ -33,6 +33,7 @@ dim shared ghFont(MAXFONTS) as HFONT
 
 dim shared as HWND HWND_FRMMAIN
 dim shared as HWND HWND_FRMEXPLORER
+dim shared as HWND HWND_FRMEXPLORER2
 
 
 type THEME_TYPE

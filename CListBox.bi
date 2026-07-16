@@ -5,7 +5,7 @@
 
 type CLISTBOX_PAINTINFO
     itemID          as integer
-    b               as clsDoubleBuffer
+    b               as clsDoubleBuffer ptr    ' points to the caller's buffer (no copy)
     rc              as RECT
     isHot           as boolean
     wszCaption      as DWSTRING
@@ -41,9 +41,11 @@ type CLISTBOX
     idc_ListBox     as integer = 1000
     accumDelta      as integer = 0        ' mousewheel
     HoverTime       as integer = 250
+    nLastHotIdx     as integer = -1       ' last row the mouse was over (per-instance hover tracking)
     ExtendSel       as boolean = false
     MultipleSel     as boolean = false
     BackColor       as COLORREF
+    hFont           as HFONT              ' caller-supplied font for row text (caller owns it)
     PaintCallback   as PaintCallbackSub
     MessageCallback as MessageCallbackFunc
     
@@ -88,6 +90,13 @@ function CLISTBOX.GetRow( byval row as integer ) as CLISTBOX_ROWINFO ptr
 end function
 
 
+' ----------------------------------------------------------------------------------------
+' PUBLIC API
+' Every CListBox_* function takes the control handle returned by CListBox_Create() -- this
+' is the parent container window that hosts the owner-drawn LISTBOX child. Internally the
+' functions resolve the child listbox via GetDlgItem() as needed. Do NOT pass the child
+' listbox handle directly.
+' ----------------------------------------------------------------------------------------
 declare function CListBox_Create( byval hWndParent as HWND, byval CtrlID as integer ) as HWND
 declare function CListBox_GetBackColor( byval hListControl as HWND ) as COLORREF
 declare function CListBox_SetBackColor( byval hListControl as HWND, byval clr as COLORREF ) as COLORREF 
@@ -100,6 +109,8 @@ declare function CListBox_GetCurSel( byval hListControl as HWND ) as integer
 declare function CListBox_SetCurSel( byval hListControl as HWND, byval row as integer ) as integer
 declare function CListBox_GetRowHeight( byval hListControl as HWND ) as integer
 declare function CListBox_SetRowHeight( byval hListControl as HWND, byval height as integer ) as integer
+declare function CListBox_GetFont( byval hListControl as HWND ) as HFONT
+declare function CListBox_SetFont( byval hListControl as HWND, byval hFont as HFONT ) as boolean
 declare function CListBox_GetCount( byval hListControl as HWND ) as integer
 declare function CListBox_SetMessageCallback( byval hListControl as HWND, byval userfunc as MessageCallbackFunc ) as boolean
 declare sub      CListBox_SetHoverTime( byval hListControl as HWND, byval milliseconds as integer ) 

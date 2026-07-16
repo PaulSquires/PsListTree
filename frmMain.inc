@@ -111,14 +111,14 @@ sub CListBox_PaintCallback( byval p as CLISTBOX_PAINTINFO ptr )
 
     dim as COLORREF backclr = iif( p->isHot, theme.BackColorHot, theme.BackColor)
     dim as COLORREF foreclr = iif( p->isHot, theme.ForeColorHot, theme.ForeColor)
-    p->b.SetForeColors(foreclr, foreclr)
-    p->b.SetBackColors(backclr, backclr)
+    p->b->SetForeColors(foreclr, foreclr)
+    p->b->SetBackColors(backclr, backclr)
 
     ' Paint the entire row background
-    p->b.PaintRect( @p->rc )
+    p->b->PaintRect( @p->rc )
 
-    p->b.SetFont( GUIFONT_10 )
-    p->b.PaintText( p->wszCaption, @p->rc, DT_LEFT )
+    p->b->SetFont( ghFont(GUIFONT_10) )
+    p->b->PaintText( p->wszCaption, @p->rc, DT_LEFT )
 
 end sub
 
@@ -174,26 +174,44 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
             100, 100, 800, 600 _
             )
 
-    HWND_FRMEXPLORER = CListBox_Create( HWND_FRMMAIN, IDC_FRMMAIN_LISTBOX )
-    
     dim as RECT rc: GetClientRect( HWND_FRMMAIN, @rc )
+    dim as long halfW = rc.right \ 2
+
+    ' ---- Instance A (left half): many rows -- exercises scrolling ----
+    HWND_FRMEXPLORER = CListBox_Create( HWND_FRMMAIN, IDC_FRMMAIN_LISTBOX )
     SetWindowPos( HWND_FRMEXPLORER, 0, _
-        rc.left, rc.top, (rc.right / 2), rc.bottom, _
+        rc.left, rc.top, halfW, rc.bottom, _
         SWP_NOZORDER or SWP_SHOWWINDOW )
-    
-
-    CListBox_SetPaintCallback( HWND_FRMEXPLORER, @CListBox_PaintCallback )    
-    CListBox_SetMessageCallback( HWND_FRMEXPLORER, @CListBox_MessageCallback )    
-    CListBox_SetBackColor( HWND_FRMEXPLORER, theme.BackColor )    
-
+    CListBox_SetPaintCallback( HWND_FRMEXPLORER, @CListBox_PaintCallback )
+    CListBox_SetMessageCallback( HWND_FRMEXPLORER, @CListBox_MessageCallback )
+    CListBox_SetBackColor( HWND_FRMEXPLORER, theme.BackColor )
+    CListBox_SetFont( HWND_FRMEXPLORER, ghFont(GUIFONT_10) )
     for i as integer = 0 to 200
-        CListBox_AddString( HWND_FRMEXPLORER, "Paul Squires - " & i, 1000 + i )    
-    next    
+        CListBox_AddString( HWND_FRMEXPLORER, "Instance A - " & i, 1000 + i )
+    next
     CListBox_SetCurSel( HWND_FRMEXPLORER, 0 )
     CListBox_Refresh( HWND_FRMEXPLORER )
-            
-dim as integer nCount = CListBox_GetCount( HWND_FRMEXPLORER )
-print "Count: "; nCount
+
+    ' ---- Instance B (right half): only a few rows. This is the multi-instance
+    ' test harness: hover/selection in B must NOT affect A (proves nLastHotIdx is
+    ' per-instance), and the short list exercises the empty client-area painting
+    ' below the last row (GetListBoxEmptyClientArea). ----
+    HWND_FRMEXPLORER2 = CListBox_Create( HWND_FRMMAIN, IDC_FRMMAIN_LISTBOX )
+    SetWindowPos( HWND_FRMEXPLORER2, 0, _
+        halfW, rc.top, rc.right - halfW, rc.bottom, _
+        SWP_NOZORDER or SWP_SHOWWINDOW )
+    CListBox_SetPaintCallback( HWND_FRMEXPLORER2, @CListBox_PaintCallback )
+    CListBox_SetMessageCallback( HWND_FRMEXPLORER2, @CListBox_MessageCallback )
+    CListBox_SetBackColor( HWND_FRMEXPLORER2, theme.BackColor )
+    CListBox_SetFont( HWND_FRMEXPLORER2, ghFont(GUIFONT_10) )
+    for i as integer = 0 to 7
+        CListBox_AddString( HWND_FRMEXPLORER2, "Instance B - " & i, 2000 + i )
+    next
+    CListBox_SetCurSel( HWND_FRMEXPLORER2, 0 )
+    CListBox_Refresh( HWND_FRMEXPLORER2 )
+
+    print "Instance A count: "; CListBox_GetCount( HWND_FRMEXPLORER )
+    print "Instance B count: "; CListBox_GetCount( HWND_FRMEXPLORER2 )
 
     
     UpdateWindow( pWindow->hWindow )

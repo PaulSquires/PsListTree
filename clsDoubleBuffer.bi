@@ -29,11 +29,12 @@ type clsDoubleBuffer
         _forecolorhot    as COLORREF
         _backcolor       as COLORREF
         _backcolorhot    as COLORREF
-        _FontIndex       as long = GUIFONT_10
+        _hFont           as HFONT         ' caller-supplied font; the control/host owns it
         _UsePaint        as boolean       ' use Begin/EndPaint. Used when WM_PAINT or WM_DRAWITEM
 
     public:
 
+    declare destructor()
     declare function BeginDoubleBuffer( byval hwnd as HWND ) as long
     declare function BeginDoubleBuffer( byval hwnd as HWND, byval hdc as HDC, byval rcItem as RECT ) as long
     declare function EndDoubleBuffer() as long
@@ -90,7 +91,7 @@ type clsDoubleBuffer
                 byval rc as RECT ptr, _
                 byval forecolor as COLORREF _
                 ) as long
-    declare function SetFont( byval FontIndex as long ) as long
+    declare function SetFont( byval hFont as HFONT ) as long
     declare function SetForeColors( byval forecolor as COLORREF, byval forecolorhot as COLORREF ) as long
     declare function SetBackColors( byval backcolor as COLORREF, byval backcolorhot as COLORREF ) as long
     declare function SetPenColor( byval pencolor as COLORREF ) as long
