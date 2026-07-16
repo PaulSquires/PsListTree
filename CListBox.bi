@@ -67,7 +67,17 @@ type CLISTBOX
     PaintCallback   as PaintCallbackSub
     MessageCallback as MessageCallbackFunc
     TooltipCallback as TooltipCallbackFunc    ' optional; defaults to the row's Text
+    ' --- Reusable one-row back buffer, so WM_DRAWITEM doesn't create/destroy a
+    '     compatible DC + bitmap for every row on every repaint. ---
+    cacheDC         as HDC
+    cacheBmp        as HBITMAP
+    cacheOldBmp     as HBITMAP
+    cacheW          as integer = 0
+    cacheH          as integer = 0
 
+    declare destructor()
+    declare function EnsureCache( byval refDC as HDC, byval w as integer, byval h as integer ) as HDC
+    declare sub      FreeCache()
     declare function GetCount() as integer                                  ' model row count
     declare function GetVisibleCount() as integer
     declare function AddRow() as CLISTBOX_ROWINFO ptr                       ' append
@@ -90,6 +100,40 @@ type CLISTBOX
     declare sub      NotifyChange()
     declare sub      Refresh()
 end type
+
+destructor CLISTBOX()
+    this.FreeCache()
+end destructor
+
+' Return a cached memDC whose selected bitmap is at least w x h, (re)creating it
+' only when the requested size changes. Bitmap is compatible with refDC.
+function CLISTBOX.EnsureCache( byval refDC as HDC, byval w as integer, byval h as integer ) as HDC
+    if (this.cacheDC <> 0) andalso (this.cacheW = w) andalso (this.cacheH = h) then
+        return this.cacheDC
+    end if
+    this.FreeCache()
+    this.cacheDC     = CreateCompatibleDC( refDC )
+    this.cacheBmp    = CreateCompatibleBitmap( refDC, w, h )
+    this.cacheOldBmp = SelectObject( this.cacheDC, this.cacheBmp )
+    this.cacheW      = w
+    this.cacheH      = h
+    return this.cacheDC
+end function
+
+sub CLISTBOX.FreeCache()
+    if this.cacheDC then
+        if this.cacheOldBmp then SelectObject( this.cacheDC, this.cacheOldBmp )
+        DeleteDC( this.cacheDC )
+        this.cacheDC = 0
+    end if
+    if this.cacheBmp then
+        DeleteObject( this.cacheBmp )
+        this.cacheBmp = 0
+    end if
+    this.cacheOldBmp = 0
+    this.cacheW = 0
+    this.cacheH = 0
+end sub
 
 function CLISTBOX.GetCount() as integer
     return this.rowCount

@@ -16,36 +16,30 @@ end function
 
 
 ' ========================================================================================
-' Calcluate the client area at bottom of Listbox not covered by a row (needed to manually
-' paint the unused area in WM_ERASEBKGRD messages to avoid flicker.
+' Calculate the client area at the bottom of the listbox not covered by any row, so it
+' can be painted manually in WM_ERASEBKGND (avoids flicker). Only non-empty when the list
+' is shorter than the viewport; LBS_NOINTEGRALHEIGHT owner-draws any partial bottom row,
+' so there is no partial-line gap to special-case.
 ' ========================================================================================
 function GetListBoxEmptyClientArea( byval hListBox as HWND ) as RECT
     dim as RECT rc: GetClientRect( hListBox, @rc )
-    ' if the number of lines in the listbox is less than the number per page then 
-    ' calculate from last item to bottom of listbox, otherwise calculate based on
-    ' the mod of the lineheight to listbox height so we can color the partial line
-    ' that won't be displayed at the bottom of the list.
-    dim as RECT rcItem
-    SendMessage( hListBox, LB_GETITEMRECT, 0, cast(LPARAM, @rcItem) )
-    dim as long itemHeight = rcItem.bottom - rcItem.top
-    dim as long NumItems = ListBox_GetCount(hListBox)
-    ' NOTE: do NOT divide by itemHeight here -- on an empty list LB_GETITEMRECT(0)
-    ' fails and itemHeight is 0. ItemsPerPage is (re)computed below only when
-    ' NumItems > 0, so item 0 is guaranteed to exist there.
-    dim as long ItemsPerPage
-    dim as long nTopIndex = SendMessage( hListBox, LB_GETTOPINDEX, 0, 0 )
+    ' Row height from LB_GETITEMHEIGHT is valid even with zero items (fixed-height
+    ' owner-draw), unlike LB_GETITEMRECT(0) which fails when item 0 doesn't exist.
+    dim as long itemHeight = SendMessage( hListBox, LB_GETITEMHEIGHT, 0, 0 )
+    dim as long NumItems   = ListBox_GetCount(hListBox)
+    dim as long nTopIndex  = SendMessage( hListBox, LB_GETTOPINDEX, 0, 0 )
     dim as long visible_rows = 0
 
-    if NumItems > 0 then
-        ItemsPerPage = (rc.bottom - rc.top) / itemHeight
-        dim as long bottom_index = (nTopIndex + ItemsPerPage)
+    if (NumItems > 0) andalso (itemHeight > 0) then
+        dim as long ItemsPerPage = (rc.bottom - rc.top) \ itemHeight
+        dim as long bottom_index = nTopIndex + ItemsPerPage
         if bottom_index >= NumItems then bottom_index = NumItems - 1
         visible_rows = (bottom_index - nTopIndex) + 1
     end if
 
-    rc.top = visible_rows * itemHeight 
+    rc.top = visible_rows * itemHeight
     if rc.top > rc.bottom then rc.top = rc.bottom
-    
+
     return rc
 end function
 
@@ -609,7 +603,12 @@ function CListBox_OnDrawItem( _
 
         dim as clsDoubleBuffer b
 
-        b.BeginDoubleBuffer(lpdis->hwndItem, lpdis->hDC, lpdis->rcItem)
+        ' Reuse a per-control back buffer (one row) instead of creating/destroying
+        ' a compatible DC + bitmap for every row on every repaint.
+        dim as integer rowW = lpdis->rcItem.right  - lpdis->rcItem.left
+        dim as integer rowH = lpdis->rcItem.bottom - lpdis->rcItem.top
+        dim as HDC cachedDC = pList->EnsureCache( lpdis->hDC, rowW, rowH )
+        b.BeginDoubleBuffer(lpdis->hwndItem, lpdis->hDC, lpdis->rcItem, cachedDC)
         b.SetFont( pList->hFont )    ' default row font; the paint callback may override
 
         ' Hot = the single row the mouse is currently over. pList->nLastHotIdx is a
@@ -941,21 +940,31 @@ function CListBoxListBox_SubclassProc ( _
 
         Case WM_MOUSEWHEEL
             if pList then
-                ' accumulate delta until scroll one line (up +120, down -120).
-                ' 120 is the Microsoft default delta
-                dim as long zDelta = GET_WHEEL_DELTA_WPARAM( _wParam )
-                dim as long nTopIndex = SendMessage( hWin, LB_GETTOPINDEX, 0, 0 ) 
-                pList->accumDelta = pList->accumDelta + zDelta
-                if pList->accumDelta >= 120 then       ' scroll up 3 lines
-                    nTopIndex = nTopIndex - 3
-                    nTopIndex = max( 0, nTopIndex )
+                ' Accumulate the wheel delta and scroll one "notch" per WHEEL_DELTA
+                ' (120), by the user's configured lines-per-notch. The remainder is
+                ' kept so slow/precision wheels still scroll smoothly.
+                dim as long linesPerNotch = 3
+                SystemParametersInfo( SPI_GETWHEELSCROLLLINES, 0, @linesPerNotch, 0 )
+                dim as long page = CListBox_ItemsPerPage( pList )
+                if (linesPerNotch < 1) orelse (linesPerNotch > page) then linesPerNotch = page  ' WHEEL_PAGESCROLL / bogus
+                if linesPerNotch < 1 then linesPerNotch = 1
+
+                pList->accumDelta += GET_WHEEL_DELTA_WPARAM( _wParam )
+                dim as long nTopIndex = SendMessage( hWin, LB_GETTOPINDEX, 0, 0 )
+                dim as boolean moved = false
+                while pList->accumDelta >= WHEEL_DELTA          ' wheel forward -> scroll up
+                    nTopIndex -= linesPerNotch
+                    pList->accumDelta -= WHEEL_DELTA
+                    moved = true
+                wend
+                while pList->accumDelta <= -WHEEL_DELTA         ' wheel back -> scroll down
+                    nTopIndex += linesPerNotch
+                    pList->accumDelta += WHEEL_DELTA
+                    moved = true
+                wend
+                if moved then
+                    if nTopIndex < 0 then nTopIndex = 0
                     SendMessage( hWin, LB_SETTOPINDEX, nTopIndex, 0 )
-                    pList->accumDelta = 0
-                    if (pList->MessageCallback <> 0) andalso pList->MessageCallback( @m ) then return 0
-                elseif pList->accumDelta <= -120 then  ' scroll down 3 lines
-                    nTopIndex = nTopIndex + 3
-                    SendMessage( hWin, LB_SETTOPINDEX, nTopIndex, 0 )
-                    pList->accumDelta = 0
                     if (pList->MessageCallback <> 0) andalso pList->MessageCallback( @m ) then return 0
                 end if
             end if
@@ -1063,10 +1072,9 @@ function CListBoxListBox_SubclassProc ( _
 
 
         case WM_ERASEBKGND
-            ' if the number of lines in the listbox maybe less than the number per page then 
-            ' calculate from last item to bottom of listbox, otherwise calculate based on
-            ' the mod of the lineheight to listbox height so we can color the partial line
-            ' that won't be displayed at the bottom of the list.
+            ' Paint only the empty area below the last row with the control's back
+            ' color (the rows themselves are drawn via WM_DRAWITEM). Prevents the
+            ' default full-client erase, which would flicker.
             if pList then
                 dim as RECT rc = GetListBoxEmptyClientArea( hWin )
                 if rc.top < rc.bottom then
@@ -1130,8 +1138,9 @@ function CListBox_Create( byval hWndParent as HWND, byval CtrlID as integer ) as
             pWindow->Create( hWndParent, "", @CListBox_WndProc, _
             0, 0, 0, 0, WS_CHILD or WS_CLIPSIBLINGS or WS_CLIPCHILDREN _
             )
-    ' Disable background erasing by only assigning the one style
-    pWindow->ClassStyle = CS_DBLCLKS
+    ' Enable double-click messages (WM_LBUTTONDBLCLK) on the container's window
+    ' class, preserving the class's existing styles rather than replacing them.
+    pWindow->ClassStyle = pWindow->ClassStyle or CS_DBLCLKS
 
     ' Define the TYPE that holds all the information about this custom listbox.
     dim as CLISTBOX ptr pList = new CLISTBOX
