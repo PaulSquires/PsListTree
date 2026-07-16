@@ -118,11 +118,16 @@ end function
 ' ========================================================================================
 sub CListBox_SetTooltip( byval hListControl as HWND, byval wszTooltip as DWSTRING )
     dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
-    if pList = null then return 
+    if pList = null then return
     ' Only set the tooltip if it has changed
     if pList->wszTooltip <> wszTooltip then
         pList->wszTooltip = wszTooltip
-        AfxSetTooltipText( pList->hTooltip, pList->hWin, wszTooltip )
+        ' The tooltip tool was registered against the CHILD listbox (see
+        ' AfxAddTooltip in CListBox_Create), so the text must be set against
+        ' that same handle -- NOT the form (pList->hWin), or TTM_GETTOOLINFOW
+        ' fails to find the tool and the text is silently dropped.
+        dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
+        AfxSetTooltipText( pList->hTooltip, hList, wszTooltip )
     end if
 end sub
 
@@ -555,7 +560,9 @@ function CListBoxListBox_SubclassProc ( _
             if pList then
                 pList->nLastHotIdx = -1
                 pList->wszTooltip = ""
-                AfxSetTooltipText( pList->hTooltip, pList->hWin, "" )
+                ' hWin is the child listbox (the subclass target) -- the correct
+                ' handle for the tooltip tool, matching how it was registered.
+                AfxSetTooltipText( pList->hTooltip, hWin, "" )
                 AfxRedrawWindow(hWin)
                 if (pList->MessageCallback <> 0) andalso pList->MessageCallback( @m ) then return 0
             end if

@@ -145,9 +145,35 @@ Goal: the visual + input model tiko needs.
   - **Verify (runtime):** with fewer rows than fill the client (`LBS_NOINTEGRALHEIGHT` leaves
     blank space below the last row), confirm hovering that blank area reports HIWORD=1 and does
     not leave the last row stuck hot. Add an explicit `GetCount()` bounds check if it does.
+- **Per-row tooltips via `TTN_GETDISPINFO` (replace the push model).** Today the tooltip tool is
+  registered over the whole listbox and the host pushes text on `WM_MOUSEHOVER` via
+  `CListBox_SetTooltip` (whose child-vs-form handle bug was fixed in Phase 1). This push model has
+  a structural flaw: a bubble that is already visible does not refresh or reposition as the mouse
+  moves between rows. Move to an on-demand callback model:
+  - **Register with `LPSTR_TEXTCALLBACK`.** In `AfxAddTooltip`/tool setup, set the tool text to
+    `LPSTR_TEXTCALLBACK` so the tooltip queries text on demand instead of holding a fixed string.
+    Keep the single whole-listbox tool (`TTF_IDISHWND`); do NOT register per-item tool rects —
+    that scales badly under `LBS_NODATA` with thousands of rows.
+  - **Answer `TTN_GETDISPINFOW`.** The tooltip sends its notifications to the tool's owner window
+    = the CListBox form (`tti.hwnd = GetParent(hList)`), so handle `WM_NOTIFY` /
+    `TTN_GETDISPINFOW` in `CListBox_WndProc` (it currently handles SIZE/PAINT/MEASUREITEM/
+    DRAWITEM/NCDESTROY/ERASEBKGND — add NOTIFY). Fill `lpszText` with the text for the current
+    hot row, `pList->nHotIdx` (reusing the unified hot index above). Point `lpszText` at a buffer
+    with instance lifetime (a `DWSTRING` field on `CLISTBOX`), not a local.
+  - **Refresh on row change.** In the `WM_MOUSEMOVE` hot-tracking block, when `nHotIdx` changes,
+    `TTM_POP` the current tip (and/or `TTM_UPDATE`) so the next show re-queries `TTN_GETDISPINFOW`
+    for the new row — this is what fixes the stale/misplaced bubble.
+  - **Text source — decide.** Recommended: a host-supplied `TooltipCallback( pList, row )` that
+    returns a `DWSTRING` (consistent with the Paint/Message callbacks; lets an explorer show a
+    full path while the row shows a truncated name). Default to the model row's `Text` when no
+    callback is set. Keep `CListBox_SetTooltip` only as an optional manual override, or retire it.
+  - **Multi-instance:** each instance owns its own tooltip control and its own form WndProc, so
+    `TTN_GETDISPINFOW` resolves to the right `CLISTBOX` via the notified form — no shared state.
 
 Test: keyboard-only navigation reaches every row; multi-select count matches; selection survives
-collapse/expand; hovering blank space below the last row clears the hot state.
+collapse/expand; hovering blank space below the last row clears the hot state; tooltips appear on
+hover and update to the correct text as the mouse moves between rows (including across two
+instances without cross-talk).
 
 ---
 
