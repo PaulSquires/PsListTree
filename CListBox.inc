@@ -527,9 +527,12 @@ function CListBox_OnDrawItem( _
         b.BeginDoubleBuffer(lpdis->hwndItem, lpdis->hDC, lpdis->rcItem)
         b.SetFont( pList->hFont )    ' default row font; the paint callback may override
 
-        dim as boolean isHot = false
-        if isMouseOverRECT(lpdis->hwndItem, b.rcClient) then isHot = true
-        if ListBox_GetSel(lpdis->hwndItem, lpdis->itemID) then isHot = true
+        ' Hot = the single row the mouse is currently over. pList->nLastHotIdx is a
+        ' VISIBLE index (same space as lpdis->itemID) and is the ONE source of truth,
+        ' so exactly one row is ever hot and it clears deterministically on
+        ' WM_MOUSELEAVE. Do NOT hit-test the cursor here (paint-time race) and do NOT
+        ' fold selection into "hot" -- selection highlighting is a Phase 3 concern.
+        dim as boolean isHot = (lpdis->itemID = pList->nLastHotIdx)
 
         ' Create our rect that works with the entire line
         dim as RECT rc
@@ -682,10 +685,14 @@ function CListBoxListBox_SubclassProc ( _
             ' client area.
             if pList andalso hiword(idx) <> 1 then
                 if idx <> pList->nLastHotIdx then
+                    ' Repaint the newly-hot row and the previously-hot row. FALSE =
+                    ' no background erase; the double buffer fully paints each row.
                     ListBox_GetItemRect( hWin, idx, @rc )
-                    InvalidateRect( hWin, @rc, true )
-                    ListBox_GetItemRect( hWin, pList->nLastHotIdx, @rc )
-                    InvalidateRect( hWin, @rc, true )
+                    InvalidateRect( hWin, @rc, FALSE )
+                    if pList->nLastHotIdx <> -1 then
+                        ListBox_GetItemRect( hWin, pList->nLastHotIdx, @rc )
+                        InvalidateRect( hWin, @rc, FALSE )
+                    end if
                     pList->nLastHotIdx = idx
                 end if
             end if
