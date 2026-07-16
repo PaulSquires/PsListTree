@@ -197,11 +197,28 @@ instances without cross-talk).
 
 ## Phase 5 — API surface & documentation
 
-- Consistent `CListBox_*` naming; documented public header.
-- Document the callback contracts (paint + message) and the form-vs-listbox handle convention.
-- Consider an opaque handle type so callers can't accidentally pass the wrong HWND.
-- Expand `main.bas` into a real test harness: two instances, headers with collapse, multi-select,
-  keyboard-only run-through.
+Done:
+- **Documented public header.** `CListBox.bi`'s API section is reorganised into labelled groups
+  (creation / rows / counts / contents / groups / selection / appearance / scrollbar / callbacks)
+  with the contracts stated up front: the handle convention, that all row indices are *model*
+  indices, the one-level group rule, and font/lifetime ownership.
+- **Callback contracts** documented on the type declarations themselves — including the trap that
+  `MessageCallbackFunc`'s result is ignored for `WM_LBUTTONUP` (swallowing it strands the
+  listbox's mouse capture).
+- **Naming consistency.** `SetMessageCallback` was the odd one out (a `function as boolean` while
+  the other three callback setters were `sub`s) — now a `sub`. `AddString`/`InsertString`/
+  `DeleteString` were kept deliberately: they mirror `LB_ADDSTRING`/`LB_INSERTSTRING`/
+  `LB_DELETESTRING` and read naturally in Win32 code.
+- **`README.md`** — quick start, concepts, input reference, callback table.
+- **Test harness.** `main.bas`/`frmMain.inc` runs two instances covering *both* selection modes
+  (A extended, B multi-toggle), groups with collapse, and prints a checklist of the interactive
+  behaviours that can only be verified by hand.
+
+Decisions:
+- **No opaque handle type.** The plan said "consider"; rejected. The control handle must remain a
+  real `HWND` because callers legitimately treat the control as a window (the demo positions it
+  with `SetWindowPos`). An opaque wrapper would buy slight type-safety and break that.
+- **Folding into tiko is done manually** by the author and is deliberately not part of this phase.
 
 ---
 

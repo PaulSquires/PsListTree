@@ -233,12 +233,11 @@ end sub
 ' ========================================================================================
 ' Set the user defined message callback for the custom listbox control.
 ' ========================================================================================
-function CListBox_SetMessageCallback( byval hListControl as HWND, byval userfunc as MessageCallbackFunc ) as boolean
+sub CListBox_SetMessageCallback( byval hListControl as HWND, byval userfunc as MessageCallbackFunc )
     dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
-    if pList = null then return false
+    if pList = null then return
     pList->MessageCallback = userfunc
-    return true
-end function
+end sub
 
 
 ' ========================================================================================

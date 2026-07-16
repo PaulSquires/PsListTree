@@ -42,9 +42,20 @@ type CLISTBOX_ROWINFO
     itemData        as integer
 end type
 
+' Draw one row. Called for each visible row on every repaint; keep it cheap. Paint through
+' p->b (a per-control buffer that is already clipped and offset to this row), using p->rc
+' as the row rect -- do not touch the screen DC. Style from the state flags; the control
+' decides them, you only render. Nothing is drawn if no paint callback is set.
 type PaintCallbackSub as sub( byval p as CLISTBOX_PAINTINFO ptr )
+
+' Observe mouse messages. Return TRUE if you handled it and want the default listbox
+' handling suppressed, FALSE to let it proceed.
+' CAUTION: for WM_LBUTTONUP the result is IGNORED and the default always runs -- the
+' listbox releases its mouse capture there, and swallowing it strands the capture.
 type MessageCallbackFunc as function( byval m as CLISTBOX_MESSAGEINFO ptr ) as boolean
-' Return the tooltip text for a MODEL row on demand (empty = no tooltip).
+
+' Supply the tooltip text for a MODEL row, on demand (only when a tip is about to show).
+' Return "" for no tooltip. If unset, the row's own Text is used.
 type TooltipCallbackFunc as function( byval hListControl as HWND, byval row as integer ) as DWSTRING
 
 type CLISTBOX
@@ -332,33 +343,92 @@ sub CLISTBOX.Refresh()
 end sub
 
 
-' ----------------------------------------------------------------------------------------
+' ========================================================================================
 ' PUBLIC API
-' Every CListBox_* function takes the control handle returned by CListBox_Create() -- this
-' is the parent container window that hosts the owner-drawn LISTBOX child. Internally the
-' functions resolve the child listbox via GetDlgItem() as needed. Do NOT pass the child
-' listbox handle directly.
+' ========================================================================================
+'
+' THE CONTROL HANDLE
+'   Every CListBox_* function takes the handle returned by CListBox_Create(). That handle
+'   is the container window, which hosts two children: the owner-drawn LISTBOX and the
+'   vertical scrollbar. The functions resolve those children internally. Never pass the
+'   child listbox handle -- results are undefined.
+'
+'   The handle is a real HWND on purpose (not an opaque type): callers legitimately need
+'   to treat the control as a window, e.g. SetWindowPos() to place and size it. An opaque
+'   wrapper would buy a little type-safety and break that, so it was rejected.
+'
+' ROW INDICES ARE *MODEL* INDICES
+'   Rows are addressed by the order they were added, independent of what is on screen.
+'   Collapsing a group does NOT renumber anything, and hidden rows keep working with every
+'   row API (including selection). Internally the control maps model rows to the visible
+'   listbox positions; that mapping never leaks into this API. Everything you receive --
+'   PAINTINFO.itemID, MESSAGEINFO.idx, GetCurSel, GetSelItems -- is a model index too.
+'
+' GROUPS
+'   A row is either a header or an item. Items belong to the nearest preceding header;
+'   there is exactly one level of nesting (no nested headers). Collapsing a header hides
+'   its items. Headers are selectable and are returned by GetSelItems, so use
+'   CListBox_IsHeader() to tell them apart.
+'
+' LIFETIME
+'   The control frees itself when its window is destroyed. Fonts you pass in stay yours.
+'
+' ----------------------------------------------------------------------------------------
+' Creation
+'   CtrlID is the child listbox's control id (the scrollbar takes CtrlID + 1). The control
+'   is created zero-sized: position it with SetWindowPos().
 ' ----------------------------------------------------------------------------------------
 declare function CListBox_Create( byval hWndParent as HWND, byval CtrlID as integer ) as HWND
-declare function CListBox_GetBackColor( byval hListControl as HWND ) as COLORREF
-declare function CListBox_SetBackColor( byval hListControl as HWND, byval clr as COLORREF ) as COLORREF 
+
+' ----------------------------------------------------------------------------------------
+' Adding / removing rows.  Add* and Insert* return the new row's model index, or -1.
+' Wrap bulk loads in BeginUpdate/EndUpdate: it collapses the per-row rebuild+repaint into
+' one, turning an O(n^2) load into O(n). The pairs nest.
+' ----------------------------------------------------------------------------------------
 declare function CListBox_AddString( byval hListControl as HWND, byval Text as DWSTRING, byval itemData as integer = 0 ) as integer
 declare function CListBox_AddHeader( byval hListControl as HWND, byval Text as DWSTRING, byval itemData as integer = 0 ) as integer
 declare function CListBox_InsertString( byval hListControl as HWND, byval row as integer, byval Text as DWSTRING, byval itemData as integer = 0 ) as integer
 declare function CListBox_DeleteString( byval hListControl as HWND, byval row as integer ) as boolean
 declare sub      CListBox_Clear( byval hListControl as HWND )
+declare sub      CListBox_BeginUpdate( byval hListControl as HWND )
+declare sub      CListBox_EndUpdate( byval hListControl as HWND )
+declare sub      CListBox_Refresh( byval hListControl as HWND )
+
+' ----------------------------------------------------------------------------------------
+' Counts.  GetCount = every row in the model. GetVisibleCount = rows currently on show
+' (headers + items of expanded groups). They differ whenever anything is collapsed.
+' ----------------------------------------------------------------------------------------
+declare function CListBox_GetCount( byval hListControl as HWND ) as integer
+declare function CListBox_GetVisibleCount( byval hListControl as HWND ) as integer
+
+' ----------------------------------------------------------------------------------------
+' Row contents.  Set* return FALSE for an invalid row index.
+' ----------------------------------------------------------------------------------------
+declare function CListBox_GetText( byval hListControl as HWND, byval row as integer ) as DWSTRING
+declare function CListBox_SetText( byval hListControl as HWND, byval row as integer, byval Text as DWSTRING ) as boolean
+declare function CListBox_GetItemData( byval hListControl as HWND, byval row as integer ) as integer
+declare function CListBox_SetItemData( byval hListControl as HWND, byval row as integer, byval itemData as integer ) as boolean
+
+' ----------------------------------------------------------------------------------------
+' Groups / collapsing.  Collapse/Expand/Toggle act only on header rows and return FALSE
+' for items or invalid rows. A mouse click on a header toggles it without disturbing the
+' selection; the keyboard uses Left/Right.
+' ----------------------------------------------------------------------------------------
 declare function CListBox_IsHeader( byval hListControl as HWND, byval row as integer ) as boolean
 declare function CListBox_IsCollapsed( byval hListControl as HWND, byval row as integer ) as boolean
 declare function CListBox_CollapseRow( byval hListControl as HWND, byval row as integer ) as boolean
 declare function CListBox_ExpandRow( byval hListControl as HWND, byval row as integer ) as boolean
 declare function CListBox_ToggleRow( byval hListControl as HWND, byval row as integer ) as boolean
-declare sub      CListBox_BeginUpdate( byval hListControl as HWND )
-declare sub      CListBox_EndUpdate( byval hListControl as HWND )
-declare function CListBox_GetVisibleCount( byval hListControl as HWND ) as integer
-declare function CListBox_GetText( byval hListControl as HWND, byval row as integer ) as DWSTRING
-declare function CListBox_SetText( byval hListControl as HWND, byval row as integer, byval Text as DWSTRING ) as boolean
-declare function CListBox_GetItemData( byval hListControl as HWND, byval row as integer ) as integer
-declare function CListBox_SetItemData( byval hListControl as HWND, byval row as integer, byval itemData as integer ) as boolean
+
+' ----------------------------------------------------------------------------------------
+' Selection.  Selection is stored on the rows, so it survives collapse/expand and can
+' include hidden rows and headers.
+'   Modes are mutually exclusive; both off = single-select:
+'     SetExtendedSelect - Shift ranges / Ctrl toggles (explorer style)
+'     SetMultiSelect    - every click toggles one row (checklist style)
+'   GetCurSel/SetCurSel address the focused row. SetCurSel selects only that row.
+'   GetSelItems reports ALL selected rows, hidden ones included, and redims selItems().
+' ----------------------------------------------------------------------------------------
 declare function CListBox_GetCurSel( byval hListControl as HWND ) as integer
 declare function CListBox_SetCurSel( byval hListControl as HWND, byval row as integer ) as integer
 declare function CListBox_GetSel( byval hListControl as HWND, byval row as integer ) as boolean
@@ -368,17 +438,37 @@ declare function CListBox_GetSelItems( byval hListControl as HWND, selItems() as
 declare sub      CListBox_SelectAll( byval hListControl as HWND, byval state as boolean )
 declare function CListBox_SetMultiSelect( byval hListControl as HWND, byval enable as boolean ) as boolean
 declare function CListBox_SetExtendedSelect( byval hListControl as HWND, byval enable as boolean ) as boolean
+
+' ----------------------------------------------------------------------------------------
+' Appearance.  Row height is in unscaled units and is DPI-scaled internally. The font is
+' borrowed, never owned: keep it alive and destroy it yourself.
+' ----------------------------------------------------------------------------------------
+declare function CListBox_GetBackColor( byval hListControl as HWND ) as COLORREF
+declare function CListBox_SetBackColor( byval hListControl as HWND, byval clr as COLORREF ) as COLORREF
 declare function CListBox_GetRowHeight( byval hListControl as HWND ) as integer
 declare function CListBox_SetRowHeight( byval hListControl as HWND, byval height as integer ) as integer
 declare function CListBox_GetFont( byval hListControl as HWND ) as HFONT
 declare function CListBox_SetFont( byval hListControl as HWND, byval hFont as HFONT ) as boolean
+declare sub      CListBox_SetHoverTime( byval hListControl as HWND, byval milliseconds as integer )
+
+' ----------------------------------------------------------------------------------------
+' Vertical scrollbar.  Created, positioned, ranged and auto-hidden by this control -- it
+' appears only while the rows overflow, and the listbox reclaims the width otherwise.
+' Nothing here is required; it is for theming. GetScrollBar exposes the child for direct
+' CVScrollBar_* calls.
+' ----------------------------------------------------------------------------------------
 declare function CListBox_GetScrollBar( byval hListControl as HWND ) as HWND
 declare sub      CListBox_SetScrollBarWidth( byval hListControl as HWND, byval nWidth as integer )
 declare sub      CListBox_SetScrollBarColors( byval hListControl as HWND, byval backclr as COLORREF, byval foreclr as COLORREF, byval foreclrhot as COLORREF )
 declare sub      CListBox_SetScrollBarPaintCallback( byval hListControl as HWND, byval usersub as VScrollPaintCallbackSub )
-declare function CListBox_GetCount( byval hListControl as HWND ) as integer
-declare function CListBox_SetMessageCallback( byval hListControl as HWND, byval userfunc as MessageCallbackFunc ) as boolean
-declare sub      CListBox_SetHoverTime( byval hListControl as HWND, byval milliseconds as integer )
-declare sub      CListBox_SetTooltipCallback( byval hListControl as HWND, byval userfunc as TooltipCallbackFunc )
-declare sub      CListBox_Refresh( byval hListControl as HWND )
+
+' ----------------------------------------------------------------------------------------
+' Callbacks.  See the type declarations above for each signature and contract.
+'   PaintCallback   - draw one row. Required if you want to see anything.
+'   MessageCallback - observe mouse messages; return TRUE to suppress default handling.
+'                     NOTE: the result is ignored for WM_LBUTTONUP (see CListBox.inc).
+'   TooltipCallback - supply per-row tooltip text on demand; "" for none.
+' ----------------------------------------------------------------------------------------
 declare sub      CListBox_SetPaintCallback( byval hListControl as HWND, byval usersub as PaintCallbackSub )
+declare sub      CListBox_SetMessageCallback( byval hListControl as HWND, byval userfunc as MessageCallbackFunc )
+declare sub      CListBox_SetTooltipCallback( byval hListControl as HWND, byval userfunc as TooltipCallbackFunc )
