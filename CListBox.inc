@@ -732,6 +732,130 @@ end sub
 
 
 ' ========================================================================================
+' Keyboard-navigation helpers (all operate in MODEL space; movement is over the
+' currently VISIBLE rows).
+' ========================================================================================
+function CListBox_ItemsPerPage( byval pList as CLISTBOX ptr ) as integer
+    dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
+    if hList = 0 then return 1
+    dim as long ih = SendMessage( hList, LB_GETITEMHEIGHT, 0, 0 )
+    if ih <= 0 then return 1
+    dim as RECT rc : GetClientRect( hList, @rc )
+    dim as integer n = (rc.bottom - rc.top) \ ih
+    if n < 1 then n = 1
+    return n
+end function
+
+sub CListBox_EnsureVisible( byval pList as CLISTBOX ptr, byval modelRow as integer )
+    dim as integer vis = pList->ModelToVisible( modelRow )
+    if vis < 0 then return
+    dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
+    if hList = 0 then return
+    dim as long top = SendMessage( hList, LB_GETTOPINDEX, 0, 0 )
+    dim as integer perPage = CListBox_ItemsPerPage( pList )
+    if vis < top then
+        SendMessage( hList, LB_SETTOPINDEX, vis, 0 )
+    elseif vis >= top + perPage then
+        SendMessage( hList, LB_SETTOPINDEX, vis - perPage + 1, 0 )
+    end if
+end sub
+
+' Nearest header at or before modelRow (the group a row belongs to), or -1.
+function CListBox_ParentHeader( byval pList as CLISTBOX ptr, byval modelRow as integer ) as integer
+    for i as integer = modelRow to 0 step -1
+        if pList->rows(i).IsHeader then return i
+    next
+    return -1
+end function
+
+' Move the focus to a VISIBLE position (clamped) and apply selection per the
+' control's mode and the Shift/Ctrl modifiers, then ensure-visible and repaint.
+sub CListBox_MoveFocusVis( byval pList as CLISTBOX ptr, byval newVis as integer, byval isShift as boolean, byval isCtrl as boolean )
+    if pList->visibleCount <= 0 then return
+    if newVis < 0 then newVis = 0
+    if newVis > pList->visibleCount - 1 then newVis = pList->visibleCount - 1
+    dim as integer newModel = pList->VisibleToModel( newVis )
+    if newModel < 0 then return
+
+    pList->focusRow = newModel
+    if pList->MultipleSel then
+        ' checklist mode: arrows move focus only; Space toggles selection
+    elseif pList->ExtendSel then
+        if isShift then
+            dim as integer anchor = pList->anchorRow
+            if anchor < 0 then anchor = newModel
+            pList->ClearSelection()
+            pList->SelectRange( anchor, newModel )
+        elseif isCtrl then
+            ' Ctrl: move focus only
+        else
+            pList->SelectOnly( newModel )
+            pList->anchorRow = newModel
+        end if
+    else
+        pList->SelectOnly( newModel )
+        pList->anchorRow = newModel
+    end if
+
+    CListBox_EnsureVisible( pList, newModel )
+    dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
+    if hList then InvalidateRect( hList, NULL, FALSE )
+end sub
+
+' Left arrow: collapse an expanded header, or (from an item) jump to its header.
+sub CListBox_KeyLeft( byval pList as CLISTBOX ptr )
+    dim as integer f = pList->focusRow
+    if pList->IsValidRow(f) = false then return
+    if pList->rows(f).IsHeader then
+        if pList->rows(f).bCollapsed = false then
+            pList->rows(f).bCollapsed = true
+            pList->NotifyChange()
+            CListBox_EnsureVisible( pList, f )
+        end if
+    else
+        dim as integer h = CListBox_ParentHeader( pList, f )
+        if h >= 0 then
+            pList->focusRow  = h
+            pList->SelectOnly( h )
+            pList->anchorRow = h
+            CListBox_EnsureVisible( pList, h )
+            dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
+            if hList then InvalidateRect( hList, NULL, FALSE )
+        end if
+    end if
+end sub
+
+' Right arrow: expand a collapsed header, or (from an expanded header) step in.
+sub CListBox_KeyRight( byval pList as CLISTBOX ptr )
+    dim as integer f = pList->focusRow
+    if pList->IsValidRow(f) = false then return
+    if pList->rows(f).IsHeader = false then return
+    if pList->rows(f).bCollapsed then
+        pList->rows(f).bCollapsed = false
+        pList->NotifyChange()
+        CListBox_EnsureVisible( pList, f )
+    else
+        dim as integer curVis = pList->ModelToVisible( f )
+        CListBox_MoveFocusVis( pList, curVis + 1, false, false )
+    end if
+end sub
+
+' Space: toggle the focus row's selection (multi/extended) or select it (single).
+sub CListBox_KeySpace( byval pList as CLISTBOX ptr, byval isCtrl as boolean )
+    dim as integer f = pList->focusRow
+    if pList->IsValidRow(f) = false then return
+    if pList->MultipleSel orelse pList->ExtendSel then
+        pList->SetRowSelected( f, not pList->IsRowSelected(f) )
+    else
+        pList->SelectOnly( f )
+    end if
+    pList->anchorRow = f
+    dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
+    if hList then InvalidateRect( hList, NULL, FALSE )
+end sub
+
+
+' ========================================================================================
 ' CListBoxListBox_SubclassProc
 ' ========================================================================================
 function CListBoxListBox_SubclassProc ( _
@@ -767,9 +891,41 @@ function CListBoxListBox_SubclassProc ( _
     end select
    
     select case uMsg
+        case WM_KEYDOWN
+            if pList then
+                dim as boolean isShift = (GetAsyncKeyState(VK_SHIFT) and &H8000)
+                dim as boolean isCtrl  = (GetAsyncKeyState(VK_CONTROL) and &H8000)
+                dim as integer curVis  = pList->ModelToVisible( pList->focusRow )
+                if curVis < 0 then curVis = 0        ' no/hidden focus -> start at top
+                dim as integer perPage = CListBox_ItemsPerPage( pList )
+                if perPage < 1 then perPage = 1
+
+                select case _wParam
+                    case VK_UP
+                        CListBox_MoveFocusVis( pList, curVis - 1, isShift, isCtrl ) : return 0
+                    case VK_DOWN
+                        CListBox_MoveFocusVis( pList, curVis + 1, isShift, isCtrl ) : return 0
+                    case VK_PRIOR    ' PageUp
+                        CListBox_MoveFocusVis( pList, curVis - perPage, isShift, isCtrl ) : return 0
+                    case VK_NEXT     ' PageDown
+                        CListBox_MoveFocusVis( pList, curVis + perPage, isShift, isCtrl ) : return 0
+                    case VK_HOME
+                        CListBox_MoveFocusVis( pList, 0, isShift, isCtrl ) : return 0
+                    case VK_END
+                        CListBox_MoveFocusVis( pList, pList->visibleCount - 1, isShift, isCtrl ) : return 0
+                    case VK_LEFT
+                        CListBox_KeyLeft( pList ) : return 0
+                    case VK_RIGHT
+                        CListBox_KeyRight( pList ) : return 0
+                    case VK_SPACE
+                        CListBox_KeySpace( pList, isCtrl ) : return 0
+                end select
+            end if
+            ' unhandled keys fall through to the default listbox handler
+
         Case WM_MOUSEWHEEL
             if pList then
-                ' accumulate delta until scroll one line (up +120, down -120). 
+                ' accumulate delta until scroll one line (up +120, down -120).
                 ' 120 is the Microsoft default delta
                 dim as long zDelta = GET_WHEEL_DELTA_WPARAM( _wParam )
                 dim as long nTopIndex = SendMessage( hWin, LB_GETTOPINDEX, 0, 0 ) 
