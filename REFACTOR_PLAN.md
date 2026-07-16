@@ -205,8 +205,139 @@ instances without cross-talk).
 
 ---
 
+## Phase 6 — Owner-drawn vertical scrollbar
+
+Goal: a thin owner-drawn vertical scrollbar living immediately to the right of the listbox,
+replacing the `frmVScrollBar.inc` sketch (which is a single-instance extract from tiko and does
+not compile here — `ghPanel`, `CPanelWindow`, `SCROLLBAR_WIDTH_PANEL`, `HWND_FRMPANEL` and
+`pWindowPanel` are all undefined in this project).
+
+Resolved design decisions:
+- **Self-contained control, owned by CListBox.** It gets its own window class, its own
+  per-instance state in `UserData(0)`, and its own paint callback — i.e. structurally a
+  standalone control — but `CListBox` creates, positions and drives it, so the thumb can never
+  go stale and the host writes zero glue. Exposing a public `CVScrollBar_Create` later is then a
+  one-line change.
+- **Thumb only** — no arrow buttons.
+- **Hover highlight** on the thumb.
+- **Auto-repeat** paging while the mouse is held on the track.
+- **Auto-hide** when the content fits.
+- **Paint callback** like CListBox, with a working default so it renders out of the box.
+
+### Structure
+
+- New `CVScrollBar.bi` / `CVScrollBar.inc` following the CListBox conventions; delete
+  `frmVScrollBar.inc`.
+- Per-instance `CVSCROLLBAR` on the heap in `pWindow->UserData(0)` (fetched via a
+  `GetScrollBarPointer` helper). **Every** global/static in the sketch becomes an instance field:
+  `gPanelVScroll` (frmVScrollBar.inc:10), `HWND_FRMPANEL`/`HWND_VSCROLLBAR`/`bDragActive`
+  (13-15), and `static prev_pt` (65) — the last is the same shared-static bug class fixed in
+  Phase 1.
+- Fields: range (`nTotal`, `nPage`, `nPos`), geometry (`rcThumb`, `thumbHeight`), interaction
+  (`isDragging`, `dragOffset`, `isHot`, `hotTimerOn`, `repeatTimerOn`, `repeatDir`), colors, and
+  `PaintCallback`.
+
+### Generic range model (what keeps it reusable)
+
+The control knows nothing about listboxes: `CVScrollBar_SetRange( total, page, pos )` plus
+`GetPos/SetPos`. CListBox is simply the thing that calls it.
+
+### Corrected geometry (the sketch's math, fixed)
+
+```
+' guards FIRST -- no division until the divisors are known safe
+if (nTotal <= 0) orelse (nPage <= 0) orelse (track <= 0) then no thumb
+if (nTotal <= nPage) then no thumb                     ' everything fits
+thumbH = max( (nPage / nTotal) * track, MIN_THUMB )    ' stays grabbable on huge lists
+span   = track - thumbH
+maxPos = nTotal - nPage
+thumbY = iif( maxPos > 0, (nPos / maxPos) * span, 0 )
+```
+
+This fixes, specifically:
+- **Divide-by-zero on an empty list** — `thumbHeight = (itemsPerPage / numItems) * listBoxHeight`
+  (frmVScrollBar.inc:39) divides by `numItems` *before* the `numItems < itemsPerPage` guard at
+  line 45. Same bug class as the Phase 1 `GetListBoxEmptyClientArea` crash.
+- **Scaling off the wrong height** — line 42 positions the thumb using `listBoxHeight`, but the
+  thumb lives in the *scrollbar's* client rect. Works only while the two heights coincide. Both
+  size and position must scale off the **track** height.
+- **No minimum thumb height** — a proportional thumb collapses to 1-2 px on large lists.
+- **Inverted return value** — `calcVThumbRect` documents "Returns True if RECT is not empty" but
+  returns TRUE when it *empties* the rect (45-48) and 0 otherwise. Return TRUE = a thumb is
+  needed.
+- **Unclamped `nTopIndex`** (118-120) and an unguarded `(rc.bottom / rc.bottom)` divide.
+
+### Drag without drift
+
+The sketch moves the thumb by pixel delta and derives the index from it (110-122), but
+`LB_SETTOPINDEX` snaps to whole rows, so the painted thumb and the real position drift apart and
+then jump on the next recalc. Instead: record the grab offset within the thumb on mouse-down,
+derive `pos` from the cursor, then **recompute the thumb from `pos`** — the two can never
+disagree. (Tradeoff: the thumb snaps to row granularity mid-drag; that is standard behavior.)
+
+### Auto-repeat paging
+
+- Mouse-down on the track (not the thumb): page once in that direction, `SetCapture`, then start
+  a repeat timer — initial delay ~400 ms, then repeat every ~60-100 ms while held.
+- **Stop repeating once the thumb reaches the cursor** (standard Windows behavior), and on
+  `WM_LBUTTONUP` / `WM_CAPTURECHANGED`.
+- Needs a repeat timer id distinct from the hot-track poll timer id.
+
+### Auto-hide
+
+- Hide (`SW_HIDE`) when `nTotal <= nPage`; show when it overflows. `CListBox_PositionWindows`
+  gives the listbox the **full** client width while hidden, and reserves the strip while shown.
+- The visibility decision therefore lives in the sync path and must trigger a re-layout when it
+  flips.
+- **No oscillation risk:** hiding only changes the listbox *width*, while `itemsPerPage` depends
+  on *height* — so the overflow decision can't feed back on itself.
+- Row width changes on reflow, which the Phase 4 buffer cache keys on (`EnsureCache(w,h)`), so it
+  rebuilds automatically — nothing extra to do.
+- Clear the scrollbar's hot state when hiding, or a stale highlight reappears on re-show.
+
+### Hover + reliable leave
+
+Thumb highlights on hover. Reuse the **`TrackMouseEvent` + ~100 ms poll-timer safety net** built
+for CListBox — `TME_LEAVE` will be exactly as unreliable here, so the fix carries over for free.
+
+### Robustness the sketch lacks
+
+- `WM_CAPTURECHANGED` — without it, a stolen capture strands `bDragActive = true` and the thumb
+  sticks to the mouse forever.
+- Additive `ClassStyle` (the sketch repeats the overwrite bug fixed in Phase 4), and no
+  `CS_DBLCLKS` — double-click is meaningless for a scrollbar.
+- The creation fragment (158-161) allocates `pWindow` but calls **`pWindowPanel->Create`** (an
+  undeclared typo), uses tiko's `CPanelWindow`, and isn't inside a function.
+
+### CListBox integration
+
+- `CListBox_Create` creates the scrollbar child inside the CListBox form.
+- `CListBox_PositionWindows` reserves a DPI-scaled strip (`ScaleX`) on the right edge when shown.
+- `CListBox_SyncScrollBar()` pushes `(total = visibleCount, page = ItemsPerPage, pos = topIndex)`,
+  applies the auto-hide/relayout decision, and invalidates. Call it from `Refresh`, the wheel
+  handler, `EnsureVisible`, `MoveFocusVis`, and `WM_SIZE` — every path that can scroll, since the
+  listbox has no `WS_VSCROLL` of its own. This is what kills the sketch's worst bug: `WM_PAINT`
+  (136-147) paints `gPanelVScroll.rc` but never recalculates it, so wheel/keyboard/EnsureVisible
+  scrolling left the thumb frozen and lying about the position.
+
+### Painting
+
+`CListBox_SetScrollBarPaintCallback( hCtl, @sub )` receiving
+`{ b as clsDoubleBuffer ptr, rcClient, rcThumb, isHot, isDragging }`. Default paint uses settable
+colors so it works immediately; the callback overrides entirely. The demo's `theme` already has
+`BackColorScrollBar` / `ForeColorScrollBar`.
+
+Test: two instances scroll independently; thumb tracks wheel/keyboard/EnsureVisible scrolling;
+drag stays glued to the cursor with no drift; holding the track auto-repeats and stops when the
+thumb arrives; the bar hides when a group collapses enough to fit and reappears on expand; hover
+highlight clears reliably when the mouse leaves quickly.
+
+---
+
 ## Suggested sequencing
 
 Phases 0 and 1 are safe, high-value, and unblock everything else — do them first and independently.
 Phase 2 is the architectural core (model/view) and should land before 3, since selection and
 keyboard nav both depend on the visible-index mapping. Phase 4/5 are polish once behavior is right.
+Phase 6 (scrollbar) depends on Phase 2's visible-count model and Phase 4's cache/timer patterns,
+so it slots in after those; it is independent of Phase 5.
