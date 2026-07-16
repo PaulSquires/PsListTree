@@ -117,8 +117,19 @@ sub CListBox_PaintCallback( byval p as CLISTBOX_PAINTINFO ptr )
     ' Paint the entire row background
     p->b->PaintRect( @p->rc )
 
-    p->b->SetFont( ghFont(GUIFONT_10) )
-    p->b->PaintText( p->wszCaption, @p->rc, DT_LEFT )
+    if p->isHeader then
+        ' Header row: bold, with a +/- collapse indicator
+        dim as DWSTRING wszPrefix
+        if p->isCollapsed then wszPrefix = "+ " else wszPrefix = "- "
+        p->b->SetFont( ghFont(GUIFONTBOLD_10) )
+        p->b->PaintText( wszPrefix & p->wszCaption, @p->rc, DT_LEFT )
+    else
+        ' Item row: normal font, indented under its header
+        dim as RECT rcText = p->rc
+        rcText.left += 16
+        p->b->SetFont( ghFont(GUIFONT_10) )
+        p->b->PaintText( p->wszCaption, @rcText, DT_LEFT )
+    end if
 
 end sub
 
@@ -141,6 +152,11 @@ function CListBox_MessageCallback( byval m as CLISTBOX_MESSAGEINFO ptr ) as bool
             
         case WM_LBUTTONUP
             print "WM_LBUTTONUP on idx: "; m->idx
+            ' Clicking a header row toggles its collapsed state.
+            dim as HWND hCtl = GetParent(m->hList)
+            if CListBox_IsHeader( hCtl, m->idx ) then
+                CListBox_ToggleRow( hCtl, m->idx )
+            end if
             ' Return True because we processed this message and do not want
             ' the default windows handler to process it also.
             return true
@@ -186,16 +202,22 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
     CListBox_SetMessageCallback( HWND_FRMEXPLORER, @CListBox_MessageCallback )
     CListBox_SetBackColor( HWND_FRMEXPLORER, theme.BackColor )
     CListBox_SetFont( HWND_FRMEXPLORER, ghFont(GUIFONT_10) )
-    for i as integer = 0 to 200
-        CListBox_AddString( HWND_FRMEXPLORER, "Instance A - " & i, 1000 + i )
+    ' Two groups; bulk add is batched so the map rebuilds once, not per row.
+    CListBox_BeginUpdate( HWND_FRMEXPLORER )
+    CListBox_AddHeader( HWND_FRMEXPLORER, "Group Alpha" )
+    for i as integer = 0 to 20
+        CListBox_AddString( HWND_FRMEXPLORER, "Alpha item " & i, 1000 + i )
     next
-    CListBox_SetCurSel( HWND_FRMEXPLORER, 0 )
-    CListBox_Refresh( HWND_FRMEXPLORER )
+    CListBox_AddHeader( HWND_FRMEXPLORER, "Group Beta" )
+    for i as integer = 0 to 20
+        CListBox_AddString( HWND_FRMEXPLORER, "Beta item " & i, 2000 + i )
+    next
+    CListBox_EndUpdate( HWND_FRMEXPLORER )
+    CListBox_SetCurSel( HWND_FRMEXPLORER, 1 )
 
-    ' ---- Instance B (right half): only a few rows. This is the multi-instance
-    ' test harness: hover/selection in B must NOT affect A (proves nLastHotIdx is
-    ' per-instance), and the short list exercises the empty client-area painting
-    ' below the last row (GetListBoxEmptyClientArea). ----
+    ' ---- Instance B (right half): a couple of small groups, one starting
+    ' collapsed. Tests: per-instance hover (must not affect A), empty client-area
+    ' painting below the last row, and collapse hiding a group's items. ----
     HWND_FRMEXPLORER2 = CListBox_Create( HWND_FRMMAIN, IDC_FRMMAIN_LISTBOX )
     SetWindowPos( HWND_FRMEXPLORER2, 0, _
         halfW, rc.top, rc.right - halfW, rc.bottom, _
@@ -204,14 +226,22 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
     CListBox_SetMessageCallback( HWND_FRMEXPLORER2, @CListBox_MessageCallback )
     CListBox_SetBackColor( HWND_FRMEXPLORER2, theme.BackColor )
     CListBox_SetFont( HWND_FRMEXPLORER2, ghFont(GUIFONT_10) )
-    for i as integer = 0 to 7
-        CListBox_AddString( HWND_FRMEXPLORER2, "Instance B - " & i, 2000 + i )
+    CListBox_BeginUpdate( HWND_FRMEXPLORER2 )
+    CListBox_AddHeader( HWND_FRMEXPLORER2, "Files" )              ' model row 0
+    for i as integer = 0 to 4
+        CListBox_AddString( HWND_FRMEXPLORER2, "file" & i & ".bas", i )   ' rows 1..5
     next
-    CListBox_SetCurSel( HWND_FRMEXPLORER2, 0 )
-    CListBox_Refresh( HWND_FRMEXPLORER2 )
+    CListBox_AddHeader( HWND_FRMEXPLORER2, "Folders" )           ' model row 6
+    for i as integer = 0 to 4
+        CListBox_AddString( HWND_FRMEXPLORER2, "folder" & i, i )          ' rows 7..11
+    next
+    CListBox_EndUpdate( HWND_FRMEXPLORER2 )
+    CListBox_CollapseRow( HWND_FRMEXPLORER2, 6 )   ' start the "Folders" group collapsed
 
-    print "Instance A count: "; CListBox_GetCount( HWND_FRMEXPLORER )
-    print "Instance B count: "; CListBox_GetCount( HWND_FRMEXPLORER2 )
+    print "Instance A: "; CListBox_GetCount( HWND_FRMEXPLORER ); " model rows, "; _
+          CListBox_GetVisibleCount( HWND_FRMEXPLORER ); " visible"
+    print "Instance B: "; CListBox_GetCount( HWND_FRMEXPLORER2 ); " model rows, "; _
+          CListBox_GetVisibleCount( HWND_FRMEXPLORER2 ); " visible"
 
     
     UpdateWindow( pWindow->hWindow )

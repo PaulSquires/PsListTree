@@ -4,10 +4,12 @@
 #include once "clsDoubleBuffer.bi"
 
 type CLISTBOX_PAINTINFO
-    itemID          as integer
+    itemID          as integer                ' MODEL row index (not the visible/listbox index)
     b               as clsDoubleBuffer ptr    ' points to the caller's buffer (no copy)
     rc              as RECT
     isHot           as boolean
+    isHeader        as boolean                ' this row is a group header
+    isCollapsed     as boolean                ' header only: its child items are hidden
     wszCaption      as DWSTRING
 end type
 
@@ -16,7 +18,7 @@ type CLISTBOX_MESSAGEINFO
     uMsg            as UINT
     wParam          as WPARAM
     lParam          as LPARAM
-    idx             as integer    ' selected row
+    idx             as integer    ' MODEL row index under the mouse (-1 if none)
     isCtrl          as boolean
     isShift         as boolean
 end type
@@ -34,60 +36,179 @@ type MessageCallbackFunc as function( byval m as CLISTBOX_MESSAGEINFO ptr ) as b
 
 type CLISTBOX
     hWin            as HWND
-    hToolTip        as HWND 
+    hToolTip        as HWND
     wszTooltip      as DWSTRING
+    ' --- Model: rows() is the backing store (capacity = ubound+1); rowCount is
+    '     the number of logical rows and the single source of truth for "count". ---
     rows(any)       as CLISTBOX_ROWINFO
+    rowCount        as integer = 0
+    ' --- View: visibleMap(v) -> model row index, for v = 0..visibleCount-1.
+    '     Rebuilt on any change / collapse-expand. The listbox (LBS_NODATA) count
+    '     is always set to visibleCount. ---
+    visibleMap(any) as integer
+    visibleCount    as integer = 0
+    updateDepth     as integer = 0        ' BeginUpdate/EndUpdate nesting (defers refresh)
     RowHeight       as integer = 22
     idc_ListBox     as integer = 1000
     accumDelta      as integer = 0        ' mousewheel
     HoverTime       as integer = 250
-    nLastHotIdx     as integer = -1       ' last row the mouse was over (per-instance hover tracking)
+    nLastHotIdx     as integer = -1       ' last VISIBLE row the mouse was over (hover tracking)
     ExtendSel       as boolean = false
     MultipleSel     as boolean = false
     BackColor       as COLORREF
     hFont           as HFONT              ' caller-supplied font for row text (caller owns it)
     PaintCallback   as PaintCallbackSub
     MessageCallback as MessageCallbackFunc
-    
-    declare function GetCount() as integer
-    declare function AddRow() as CLISTBOX_ROWINFO ptr
+
+    declare function GetCount() as integer                                  ' model row count
+    declare function GetVisibleCount() as integer
+    declare function AddRow() as CLISTBOX_ROWINFO ptr                       ' append
+    declare function InsertRowAt( byval modelRow as integer ) as CLISTBOX_ROWINFO ptr
+    declare function DeleteRowAt( byval modelRow as integer ) as boolean
+    declare sub      Clear()
     declare function GetRow( byval row as integer ) as CLISTBOX_ROWINFO ptr
     declare function IsValidRow( byval row as integer ) as boolean
+    declare function ModelToVisible( byval modelRow as integer ) as integer ' -1 if hidden/invalid
+    declare function VisibleToModel( byval visRow as integer ) as integer   ' -1 if invalid
+    declare sub      RebuildVisibleMap()
+    declare sub      BeginUpdate()
+    declare sub      EndUpdate()
+    declare sub      NotifyChange()
     declare sub      Refresh()
 end type
 
-sub CLISTBOX.Refresh()
-    ' tell the virtual listbox how many rows exist now
-    dim as HWND hList = GetDlgItem( this.hWin, this.idc_ListBox )
-    ShowWindow( hList, iif(this.GetCount(), SW_SHOW, SW_HIDE) )
-    AfxRedrawWindow( hList )
-end sub
-
 function CLISTBOX.GetCount() as integer
-    dim as HWND hList = GetDlgItem( this.hWin, this.idc_ListBox )
-    return ListBox_GetCount( hList )
+    return this.rowCount
 end function
 
-function CLISTBOX.AddRow() as CLISTBOX_ROWINFO ptr
-    dim as integer ub = ubound(this.rows) + 1
-    redim preserve this.rows(ub)
-    dim as HWND hList = GetDlgItem( this.hWin, this.idc_ListBox )
-    dim as integer count = (ubound(this.rows) - lbound(this.rows) + 1)
-    SendMessage( hList, LB_SETCOUNT, count, 0 )
-    return @this.rows(ub)
+function CLISTBOX.GetVisibleCount() as integer
+    return this.visibleCount
 end function
 
 function CLISTBOX.IsValidRow( byval row as integer ) as boolean
-    if (row >= lbound(this.rows)) andalso (row <= ubound(this.rows)) then
-        return true
-    end if
-    return false    
+    return (row >= 0) andalso (row < this.rowCount)
 end function
 
 function CLISTBOX.GetRow( byval row as integer ) as CLISTBOX_ROWINFO ptr
-    if this.IsValidRow(row) = false then return null 
+    if this.IsValidRow(row) = false then return null
     return @this.rows(row)
 end function
+
+' Insert a fresh (reset) row at modelRow, shifting later rows up. Grows the
+' backing store by doubling so bulk inserts are amortized O(1), not O(n^2).
+function CLISTBOX.InsertRowAt( byval modelRow as integer ) as CLISTBOX_ROWINFO ptr
+    if modelRow < 0 then modelRow = 0
+    if modelRow > this.rowCount then modelRow = this.rowCount
+
+    dim as integer cap = ubound(this.rows) + 1
+    if this.rowCount >= cap then
+        dim as integer newcap = iif( cap = 0, 16, cap * 2 )
+        redim preserve this.rows( 0 to newcap - 1 )
+    end if
+
+    ' shift [modelRow .. rowCount-1] up by one (no-op when appending)
+    for i as integer = this.rowCount to modelRow + 1 step -1
+        this.rows(i) = this.rows(i - 1)
+    next
+
+    ' reset the new slot (frees any DWSTRING left in a recycled capacity slot)
+    with this.rows(modelRow)
+        .IsHeader   = false
+        .bCollapsed = false
+        .Text       = ""
+        .itemData   = 0
+    end with
+
+    this.rowCount += 1
+    this.NotifyChange()
+    return @this.rows(modelRow)
+end function
+
+function CLISTBOX.AddRow() as CLISTBOX_ROWINFO ptr
+    return this.InsertRowAt( this.rowCount )
+end function
+
+function CLISTBOX.DeleteRowAt( byval modelRow as integer ) as boolean
+    if this.IsValidRow(modelRow) = false then return false
+    ' shift [modelRow+1 .. rowCount-1] down by one
+    for i as integer = modelRow to this.rowCount - 2
+        this.rows(i) = this.rows(i + 1)
+    next
+    this.rows(this.rowCount - 1).Text = ""   ' free the vacated last slot's string
+    this.rowCount -= 1
+    this.NotifyChange()
+    return true
+end function
+
+sub CLISTBOX.Clear()
+    for i as integer = 0 to this.rowCount - 1
+        this.rows(i).Text = ""
+    next
+    this.rowCount = 0
+    this.NotifyChange()
+end sub
+
+' Rebuild the visible map from the model (flat, one-level grouping: an item is
+' hidden iff its nearest preceding header is collapsed) and push the visible
+' count into the LBS_NODATA listbox.
+sub CLISTBOX.RebuildVisibleMap()
+    this.visibleCount = 0
+    if this.rowCount > 0 then
+        redim this.visibleMap( 0 to this.rowCount - 1 )
+        dim as integer vis = 0
+        dim as boolean collapsed = false
+        for i as integer = 0 to this.rowCount - 1
+            if this.rows(i).IsHeader then
+                collapsed = this.rows(i).bCollapsed
+                this.visibleMap(vis) = i : vis += 1
+            elseif collapsed = false then
+                this.visibleMap(vis) = i : vis += 1
+            end if
+        next
+        this.visibleCount = vis
+    else
+        erase this.visibleMap
+    end if
+    dim as HWND hList = GetDlgItem( this.hWin, this.idc_ListBox )
+    if hList then SendMessage( hList, LB_SETCOUNT, this.visibleCount, 0 )
+end sub
+
+function CLISTBOX.ModelToVisible( byval modelRow as integer ) as integer
+    for v as integer = 0 to this.visibleCount - 1
+        if this.visibleMap(v) = modelRow then return v
+    next
+    return -1
+end function
+
+function CLISTBOX.VisibleToModel( byval visRow as integer ) as integer
+    if (visRow < 0) orelse (visRow >= this.visibleCount) then return -1
+    return this.visibleMap(visRow)
+end function
+
+sub CLISTBOX.BeginUpdate()
+    this.updateDepth += 1
+end sub
+
+sub CLISTBOX.EndUpdate()
+    if this.updateDepth > 0 then this.updateDepth -= 1
+    if this.updateDepth = 0 then this.Refresh()
+end sub
+
+' Called by every model mutator. Coalesces into a single Refresh when a
+' BeginUpdate/EndUpdate batch is active.
+sub CLISTBOX.NotifyChange()
+    if this.updateDepth = 0 then this.Refresh()
+end sub
+
+sub CLISTBOX.Refresh()
+    this.RebuildVisibleMap()
+    dim as HWND hList = GetDlgItem( this.hWin, this.idc_ListBox )
+    if hList = 0 then exit sub
+    ShowWindow( hList, SW_SHOW )
+    ' Repaint WITH background erase so the vacated region below the last row is
+    ' cleared when the list shrinks (delete / collapse).
+    InvalidateRect( hList, NULL, TRUE )
+end sub
 
 
 ' ----------------------------------------------------------------------------------------
@@ -101,6 +222,18 @@ declare function CListBox_Create( byval hWndParent as HWND, byval CtrlID as inte
 declare function CListBox_GetBackColor( byval hListControl as HWND ) as COLORREF
 declare function CListBox_SetBackColor( byval hListControl as HWND, byval clr as COLORREF ) as COLORREF 
 declare function CListBox_AddString( byval hListControl as HWND, byval Text as DWSTRING, byval itemData as integer = 0 ) as integer
+declare function CListBox_AddHeader( byval hListControl as HWND, byval Text as DWSTRING, byval itemData as integer = 0 ) as integer
+declare function CListBox_InsertString( byval hListControl as HWND, byval row as integer, byval Text as DWSTRING, byval itemData as integer = 0 ) as integer
+declare function CListBox_DeleteString( byval hListControl as HWND, byval row as integer ) as boolean
+declare sub      CListBox_Clear( byval hListControl as HWND )
+declare function CListBox_IsHeader( byval hListControl as HWND, byval row as integer ) as boolean
+declare function CListBox_IsCollapsed( byval hListControl as HWND, byval row as integer ) as boolean
+declare function CListBox_CollapseRow( byval hListControl as HWND, byval row as integer ) as boolean
+declare function CListBox_ExpandRow( byval hListControl as HWND, byval row as integer ) as boolean
+declare function CListBox_ToggleRow( byval hListControl as HWND, byval row as integer ) as boolean
+declare sub      CListBox_BeginUpdate( byval hListControl as HWND )
+declare sub      CListBox_EndUpdate( byval hListControl as HWND )
+declare function CListBox_GetVisibleCount( byval hListControl as HWND ) as integer
 declare function CListBox_GetText( byval hListControl as HWND, byval row as integer ) as DWSTRING
 declare function CListBox_SetText( byval hListControl as HWND, byval row as integer, byval Text as DWSTRING ) as boolean
 declare function CListBox_GetItemData( byval hListControl as HWND, byval row as integer ) as integer
