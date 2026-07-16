@@ -435,6 +435,9 @@ function CListBox_SetRowHeight( byval hListControl as HWND, byval height as inte
         SendMessage( hList, LB_SETITEMHEIGHT, 0, cast( LPARAM, h ) )
         AfxRedrawWindow( hList )
     end if
+    ' Row height changes items-per-page, which changes the scrollbar range (and can
+    ' flip whether it is needed at all).
+    CListBox_SyncScrollBar( pList )
     return height
 end function
 
