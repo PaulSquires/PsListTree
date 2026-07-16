@@ -303,29 +303,114 @@ end function
 
 
 ' ========================================================================================
-' Retrieve the current selected row (MODEL index) from the custom listbox control.
-' Returns -1 if there is no selection.
+' Retrieve the focused/current row (MODEL index), or -1 if none.
 ' ========================================================================================
 function CListBox_GetCurSel( byval hListControl as HWND ) as integer
     dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return -1
-    ' The listbox tracks selection by VISIBLE index; translate back to the model.
-    dim as integer visSel = ListBox_GetCurSel( GetDlgItem( pList->hWin, pList->idc_ListBox ) )
-    return pList->VisibleToModel( visSel )
+    return pList->focusRow
 end function
 
 
 ' ========================================================================================
-' Set the current selected row by MODEL index. If the row is currently hidden
-' (under a collapsed header) the selection is cleared. Returns the model row
-' selected, or -1 if it was not visible.
+' Focus and select a single row by MODEL index (clears any other selection).
+' Returns the row, or -1 if the index is invalid.
 ' ========================================================================================
 function CListBox_SetCurSel( byval hListControl as HWND, byval row as integer ) as integer
     dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return -1
+    dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
+    if pList->IsValidRow(row) = false then
+        pList->ClearSelection()
+        pList->focusRow  = -1
+        pList->anchorRow = -1
+        if hList then InvalidateRect( hList, NULL, FALSE )
+        return -1
+    end if
+    pList->SelectOnly( row )
+    pList->focusRow  = row
+    pList->anchorRow = row
+    ' keep the listbox caret in sync (for scrolling) when the row is visible
     dim as integer visRow = pList->ModelToVisible( row )
-    ListBox_SetCurSel( GetDlgItem( pList->hWin, pList->idc_ListBox ), visRow )
-    return iif( visRow >= 0, row, -1 )
+    if (hList andalso visRow >= 0) then ListBox_SetCurSel( hList, visRow )
+    if hList then InvalidateRect( hList, NULL, FALSE )
+    return row
+end function
+
+
+' ========================================================================================
+' Model-based selection API. Selection lives on the rows (per-row flag), so it
+' survives collapse/expand and can include headers and hidden rows.
+' ========================================================================================
+function CListBox_GetSel( byval hListControl as HWND, byval row as integer ) as boolean
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return false
+    return pList->IsRowSelected( row )
+end function
+
+function CListBox_SetSel( byval hListControl as HWND, byval row as integer, byval state as boolean ) as boolean
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return false
+    if pList->IsValidRow(row) = false then return false
+    pList->SetRowSelected( row, state )
+    dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
+    if hList then InvalidateRect( hList, NULL, FALSE )
+    return true
+end function
+
+function CListBox_GetSelCount( byval hListControl as HWND ) as integer
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return 0
+    return pList->GetSelCount()
+end function
+
+' Fill selItems() with the MODEL indices of every selected row (including hidden
+' rows under a collapsed header). Returns the count.
+function CListBox_GetSelItems( byval hListControl as HWND, selItems() as integer ) as integer
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return 0
+    dim as integer n = pList->GetSelCount()
+    if n = 0 then
+        erase selItems
+        return 0
+    end if
+    redim selItems( 0 to n - 1 )
+    dim as integer k = 0
+    for i as integer = 0 to pList->rowCount - 1
+        if pList->rows(i).selected then
+            selItems(k) = i
+            k += 1
+        end if
+    next
+    return n
+end function
+
+sub CListBox_SelectAll( byval hListControl as HWND, byval state as boolean )
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return
+    for i as integer = 0 to pList->rowCount - 1
+        pList->rows(i).selected = state
+    next
+    dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
+    if hList then InvalidateRect( hList, NULL, FALSE )
+end sub
+
+' Selection modes are mutually exclusive: extended (Shift/Ctrl ranges) vs.
+' multiple (each click toggles). Off = single-select.
+function CListBox_SetMultiSelect( byval hListControl as HWND, byval enable as boolean ) as boolean
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return false
+    pList->MultipleSel = enable
+    if enable then pList->ExtendSel = false
+    return true
+end function
+
+function CListBox_SetExtendedSelect( byval hListControl as HWND, byval enable as boolean ) as boolean
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return false
+    pList->ExtendSel = enable
+    if enable then pList->MultipleSel = false
+    return true
 end function
 
 
@@ -548,9 +633,12 @@ function CListBox_OnDrawItem( _
             .b           = @b
             .rc          = rc
             .isHot       = isHot
+            .isSelected  = false
+            .isFocused   = (modelRow = pList->focusRow)
             .isHeader    = false
             .isCollapsed = false
             if pRow then
+                .isSelected  = pRow->selected
                 .isHeader    = pRow->IsHeader
                 .isCollapsed = pRow->bCollapsed
                 .wszCaption  = pRow->Text
@@ -608,7 +696,43 @@ function CListBox_WndProc( _
 end function
 
 ' ========================================================================================
-' CListBoxListBox_SubclassProc 
+' Apply a mouse-click selection to the model, honoring the selection mode and the
+' Ctrl/Shift modifiers, then repaint. modelRow must be a valid model row.
+' ========================================================================================
+sub CListBox_ApplyClickSelection( byval pList as CLISTBOX ptr, byval modelRow as integer, byval isCtrl as boolean, byval isShift as boolean )
+    if (pList = null) orelse (pList->IsValidRow(modelRow) = false) then return
+
+    if pList->MultipleSel then
+        ' checklist style: every click toggles that one row
+        pList->SetRowSelected( modelRow, not pList->IsRowSelected(modelRow) )
+        pList->anchorRow = modelRow
+    elseif pList->ExtendSel then
+        if isShift then
+            dim as integer anchor = pList->anchorRow
+            if anchor < 0 then anchor = modelRow
+            if isCtrl = false then pList->ClearSelection()
+            pList->SelectRange( anchor, modelRow )
+        elseif isCtrl then
+            pList->SetRowSelected( modelRow, not pList->IsRowSelected(modelRow) )
+            pList->anchorRow = modelRow
+        else
+            pList->SelectOnly( modelRow )
+            pList->anchorRow = modelRow
+        end if
+    else
+        ' single-select
+        pList->SelectOnly( modelRow )
+        pList->anchorRow = modelRow
+    end if
+
+    pList->focusRow = modelRow
+    dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
+    if hList then InvalidateRect( hList, NULL, FALSE )
+end sub
+
+
+' ========================================================================================
+' CListBoxListBox_SubclassProc
 ' ========================================================================================
 function CListBoxListBox_SubclassProc ( _
             byval hWin   as HWND, _                 ' // Control window handle
@@ -630,7 +754,7 @@ function CListBoxListBox_SubclassProc ( _
     select case uMsg
         ' Prepare the Callback MessageInfo structure for only the messages that we handle
         case WM_MOUSEWHEEL, WM_MOUSEMOVE, WM_MOUSEHOVER, WM_MOUSELEAVE, _
-             WM_RBUTTONDOWN, WM_LBUTTONUP, WM_LBUTTONDBLCLK
+             WM_LBUTTONDOWN, WM_RBUTTONDOWN, WM_LBUTTONUP, WM_LBUTTONDBLCLK
             with m
                 .hList   = hWin
                 .uMsg    = uMsg
@@ -727,12 +851,26 @@ function CListBoxListBox_SubclassProc ( _
             end if
             
 
+        case WM_LBUTTONDOWN
+            dim as long idx = Listbox_ItemFromPoint( hWin, GET_X_LPARAM(_lParam), GET_Y_LPARAM(_lParam))
+            if pList andalso hiword(idx) <> 1 then
+                dim as integer modelRow = pList->VisibleToModel( idx )
+                m.idx = modelRow
+                ' Update the model selection before the host callback runs.
+                CListBox_ApplyClickSelection( pList, modelRow, m.isCtrl, m.isShift )
+                if pList->MessageCallback then
+                    if pList->MessageCallback( @m ) then return 0
+                end if
+            end if
+            ' fall through to DefSubclassProc so the listbox takes keyboard focus
+
+
         case WM_RBUTTONDOWN, _
              WM_LBUTTONUP, _
-             WM_LBUTTONDBLCLK 
-            dim as long idx = Listbox_ItemFromPoint( hWin, GET_X_LPARAM(_lParam), GET_Y_LPARAM(_lParam)) 
-            ' The return value contains the index of the nearest item in the LOWORD. The HIWORD is zero 
-            ' if the specified point is in the client area of the list box, or one if it is outside the 
+             WM_LBUTTONDBLCLK
+            dim as long idx = Listbox_ItemFromPoint( hWin, GET_X_LPARAM(_lParam), GET_Y_LPARAM(_lParam))
+            ' The return value contains the index of the nearest item in the LOWORD. The HIWORD is zero
+            ' if the specified point is in the client area of the list box, or one if it is outside the
             ' client area.
             if hiword(idx) <> 1 then
                 ' idx is a VISIBLE index; the callback sees MODEL indices.

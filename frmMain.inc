@@ -109,8 +109,18 @@ end Function
 ' ========================================================================================
 sub CListBox_PaintCallback( byval p as CLISTBOX_PAINTINFO ptr )
 
-    dim as COLORREF backclr = iif( p->isHot, theme.BackColorHot, theme.BackColor)
-    dim as COLORREF foreclr = iif( p->isHot, theme.ForeColorHot, theme.ForeColor)
+    ' State priority for the row background/foreground: selected > hot > normal
+    dim as COLORREF backclr, foreclr
+    if p->isSelected then
+        backclr = theme.BackColorSelect
+        foreclr = theme.ForeColorSelect
+    elseif p->isHot then
+        backclr = theme.BackColorHot
+        foreclr = theme.ForeColorHot
+    else
+        backclr = theme.BackColor
+        foreclr = theme.ForeColor
+    end if
     p->b->SetForeColors(foreclr, foreclr)
     p->b->SetBackColors(backclr, backclr)
 
@@ -129,6 +139,14 @@ sub CListBox_PaintCallback( byval p as CLISTBOX_PAINTINFO ptr )
         rcText.left += 16
         p->b->SetFont( ghFont(GUIFONT_10) )
         p->b->PaintText( p->wszCaption, @rcText, DT_LEFT )
+    end if
+
+    ' Focus (caret) row: a thin accent bar on the left edge
+    if p->isFocused then
+        dim as RECT rcBar = p->rc
+        rcBar.right = rcBar.left + 3
+        p->b->SetBackColors( theme.FocusAccent, theme.FocusAccent )
+        p->b->PaintRect( @rcBar )
     end if
 
 end sub
@@ -202,6 +220,7 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
     CListBox_SetMessageCallback( HWND_FRMEXPLORER, @CListBox_MessageCallback )
     CListBox_SetBackColor( HWND_FRMEXPLORER, theme.BackColor )
     CListBox_SetFont( HWND_FRMEXPLORER, ghFont(GUIFONT_10) )
+    CListBox_SetExtendedSelect( HWND_FRMEXPLORER, true )   ' Shift/Ctrl range selection
     ' Two groups; bulk add is batched so the map rebuilds once, not per row.
     CListBox_BeginUpdate( HWND_FRMEXPLORER )
     CListBox_AddHeader( HWND_FRMEXPLORER, "Group Alpha" )

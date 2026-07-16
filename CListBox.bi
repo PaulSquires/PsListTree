@@ -7,7 +7,9 @@ type CLISTBOX_PAINTINFO
     itemID          as integer                ' MODEL row index (not the visible/listbox index)
     b               as clsDoubleBuffer ptr    ' points to the caller's buffer (no copy)
     rc              as RECT
-    isHot           as boolean
+    isHot           as boolean                ' mouse is hovering this row
+    isSelected      as boolean                ' row is part of the selection
+    isFocused       as boolean                ' row has the keyboard focus (caret)
     isHeader        as boolean                ' this row is a group header
     isCollapsed     as boolean                ' header only: its child items are hidden
     wszCaption      as DWSTRING
@@ -27,6 +29,7 @@ end type
 type CLISTBOX_ROWINFO
     IsHeader        as boolean = false
     bCollapsed      as boolean = false
+    selected        as boolean = false    ' selection is stored in the model, not the listbox
     Text            as DWSTRING
     itemData        as integer
 end type
@@ -53,6 +56,8 @@ type CLISTBOX
     accumDelta      as integer = 0        ' mousewheel
     HoverTime       as integer = 250
     nLastHotIdx     as integer = -1       ' last VISIBLE row the mouse was over (hover tracking)
+    focusRow        as integer = -1       ' MODEL row with the keyboard focus/caret (-1 = none)
+    anchorRow       as integer = -1       ' MODEL row anchoring a shift-range selection
     ExtendSel       as boolean = false
     MultipleSel     as boolean = false
     BackColor       as COLORREF
@@ -70,6 +75,12 @@ type CLISTBOX
     declare function IsValidRow( byval row as integer ) as boolean
     declare function ModelToVisible( byval modelRow as integer ) as integer ' -1 if hidden/invalid
     declare function VisibleToModel( byval visRow as integer ) as integer   ' -1 if invalid
+    declare function IsRowSelected( byval modelRow as integer ) as boolean
+    declare sub      SetRowSelected( byval modelRow as integer, byval state as boolean )
+    declare sub      ClearSelection()
+    declare sub      SelectOnly( byval modelRow as integer )
+    declare sub      SelectRange( byval a as integer, byval b as integer )
+    declare function GetSelCount() as integer
     declare sub      RebuildVisibleMap()
     declare sub      BeginUpdate()
     declare sub      EndUpdate()
@@ -185,6 +196,45 @@ function CLISTBOX.VisibleToModel( byval visRow as integer ) as integer
     return this.visibleMap(visRow)
 end function
 
+' --- Selection is stored per-row in the model, so it survives collapse/expand
+'     index shifts and can include hidden rows and headers. ---
+function CLISTBOX.IsRowSelected( byval modelRow as integer ) as boolean
+    if this.IsValidRow(modelRow) = false then return false
+    return this.rows(modelRow).selected
+end function
+
+sub CLISTBOX.SetRowSelected( byval modelRow as integer, byval state as boolean )
+    if this.IsValidRow(modelRow) then this.rows(modelRow).selected = state
+end sub
+
+sub CLISTBOX.ClearSelection()
+    for i as integer = 0 to this.rowCount - 1
+        this.rows(i).selected = false
+    next
+end sub
+
+sub CLISTBOX.SelectOnly( byval modelRow as integer )
+    this.ClearSelection()
+    if this.IsValidRow(modelRow) then this.rows(modelRow).selected = true
+end sub
+
+sub CLISTBOX.SelectRange( byval a as integer, byval b as integer )
+    if a > b then swap a, b
+    if a < 0 then a = 0
+    if b > this.rowCount - 1 then b = this.rowCount - 1
+    for i as integer = a to b
+        this.rows(i).selected = true
+    next
+end sub
+
+function CLISTBOX.GetSelCount() as integer
+    dim as integer n = 0
+    for i as integer = 0 to this.rowCount - 1
+        if this.rows(i).selected then n += 1
+    next
+    return n
+end function
+
 sub CLISTBOX.BeginUpdate()
     this.updateDepth += 1
 end sub
@@ -240,6 +290,13 @@ declare function CListBox_GetItemData( byval hListControl as HWND, byval row as 
 declare function CListBox_SetItemData( byval hListControl as HWND, byval row as integer, byval itemData as integer ) as boolean
 declare function CListBox_GetCurSel( byval hListControl as HWND ) as integer
 declare function CListBox_SetCurSel( byval hListControl as HWND, byval row as integer ) as integer
+declare function CListBox_GetSel( byval hListControl as HWND, byval row as integer ) as boolean
+declare function CListBox_SetSel( byval hListControl as HWND, byval row as integer, byval state as boolean ) as boolean
+declare function CListBox_GetSelCount( byval hListControl as HWND ) as integer
+declare function CListBox_GetSelItems( byval hListControl as HWND, selItems() as integer ) as integer
+declare sub      CListBox_SelectAll( byval hListControl as HWND, byval state as boolean )
+declare function CListBox_SetMultiSelect( byval hListControl as HWND, byval enable as boolean ) as boolean
+declare function CListBox_SetExtendedSelect( byval hListControl as HWND, byval enable as boolean ) as boolean
 declare function CListBox_GetRowHeight( byval hListControl as HWND ) as integer
 declare function CListBox_SetRowHeight( byval hListControl as HWND, byval height as integer ) as integer
 declare function CListBox_GetFont( byval hListControl as HWND ) as HFONT
