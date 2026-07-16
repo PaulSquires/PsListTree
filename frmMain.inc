@@ -168,7 +168,13 @@ function CListBox_MessageCallback( byval m as CLISTBOX_MESSAGEINFO ptr ) as bool
             return true
             
         case WM_LBUTTONUP
-            print "WM_LBUTTONUP on idx: "; m->idx
+            ' Report the resulting selection so multi-select is observable while testing.
+            dim as HWND hCtl = GetParent(m->hList)
+            ' plain string, not DWSTRING: print interleaves wide chars
+            dim as string sKind = "item"
+            if CListBox_IsHeader( hCtl, m->idx ) then sKind = "HEADER"
+            print "click row" & str(m->idx) & " (" & sKind & ")  focus=" & _
+                  str(CListBox_GetCurSel(hCtl)) & "  selCount=" & str(CListBox_GetSelCount(hCtl))
             ' Header collapse/expand is handled inside the control on the mouse-down,
             ' and it preserves the current selection. Return FALSE: the listbox needs
             ' its default WM_LBUTTONUP handling to release the mouse capture it took
@@ -260,6 +266,8 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
     CListBox_SetTooltipCallback( HWND_FRMEXPLORER2, @CListBox_TooltipCallback )
     CListBox_SetScrollBarColors( HWND_FRMEXPLORER2, theme.BackColorScrollBar, _
                                  theme.ForeColorScrollBar, theme.ForeColorScrollBarHot )
+    ' B uses the OTHER selection mode, so the harness covers both.
+    CListBox_SetMultiSelect( HWND_FRMEXPLORER2, true )     ' checklist style: click toggles
     CListBox_BeginUpdate( HWND_FRMEXPLORER2 )
     CListBox_AddHeader( HWND_FRMEXPLORER2, "Files" )              ' model row 0
     for i as integer = 0 to 4
@@ -272,10 +280,27 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
     CListBox_EndUpdate( HWND_FRMEXPLORER2 )
     CListBox_CollapseRow( HWND_FRMEXPLORER2, 6 )   ' start the "Folders" group collapsed
 
-    print "Instance A: "; CListBox_GetCount( HWND_FRMEXPLORER ); " model rows, "; _
-          CListBox_GetVisibleCount( HWND_FRMEXPLORER ); " visible"
-    print "Instance B: "; CListBox_GetCount( HWND_FRMEXPLORER2 ); " model rows, "; _
-          CListBox_GetVisibleCount( HWND_FRMEXPLORER2 ); " visible"
+    print "CListBox / CVScrollBar test harness"
+    print "-----------------------------------"
+    print "Instance A (left) : "; CListBox_GetCount( HWND_FRMEXPLORER ); " model rows, "; _
+          CListBox_GetVisibleCount( HWND_FRMEXPLORER ); " visible   [extended select: Shift/Ctrl]"
+    print "Instance B (right): "; CListBox_GetCount( HWND_FRMEXPLORER2 ); " model rows, "; _
+          CListBox_GetVisibleCount( HWND_FRMEXPLORER2 ); " visible   [multi select: click toggles]"
+    print
+    print "Manual checks (things a script cannot drive):"
+    print "  Selection  A: click / Ctrl+click toggles / Shift+click ranges"
+    print "             B: every click toggles one row"
+    print "  Headers    click a header -> folds, and your item selection SURVIVES"
+    print "  Keyboard   arrows, PageUp/Dn, Home/End; Left/Right collapse/expand;"
+    print "             Space toggles (the only way to select a header)"
+    print "  Hover      row highlights; whip the mouse out -> must clear every time"
+    print "  Tooltips   pause on a row; text follows the row as you move"
+    print "  Scrollbar  drag thumb (works on the FIRST press); hold the track to"
+    print "             auto-repeat; thumb highlights on hover"
+    print "  Auto-hide  collapse a group in A until the rows fit -> bar disappears"
+    print "             and the list reclaims the width; expand -> it returns"
+    print "  2 instances nothing you do in one may disturb the other"
+    print
 
     
     UpdateWindow( pWindow->hWindow )
