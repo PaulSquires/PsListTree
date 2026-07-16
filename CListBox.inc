@@ -248,22 +248,22 @@ end function
 
 
 ' ========================================================================================
-' Set the tooltip for the custom listbox control.
+' Set the on-demand tooltip text callback. If none is set, the tooltip shows the
+' hovered row's Text. Return "" from the callback to suppress the tooltip.
 ' ========================================================================================
-sub CListBox_SetTooltip( byval hListControl as HWND, byval wszTooltip as DWSTRING )
+sub CListBox_SetTooltipCallback( byval hListControl as HWND, byval userfunc as TooltipCallbackFunc )
     dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return
-    ' Only set the tooltip if it has changed
-    if pList->wszTooltip <> wszTooltip then
-        pList->wszTooltip = wszTooltip
-        ' The tooltip tool was registered against the CHILD listbox (see
-        ' AfxAddTooltip in CListBox_Create), so the text must be set against
-        ' that same handle -- NOT the form (pList->hWin), or TTM_GETTOOLINFOW
-        ' fails to find the tool and the text is silently dropped.
-        dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
-        AfxSetTooltipText( pList->hTooltip, hList, wszTooltip )
-    end if
+    pList->TooltipCallback = userfunc
 end sub
+
+
+' Resolve the tooltip text for a model row: host callback if set, else row Text.
+function CListBox_ResolveTooltipText( byval pList as CLISTBOX ptr, byval modelRow as integer ) as DWSTRING
+    if (pList = null) orelse (pList->IsValidRow(modelRow) = false) then return ""
+    if pList->TooltipCallback then return pList->TooltipCallback( pList->hWin, modelRow )
+    return pList->rows(modelRow).Text
+end function
 
 
 ' ========================================================================================
@@ -672,10 +672,26 @@ function CListBox_WndProc( _
         HANDLE_MSG (hwnd, WM_MEASUREITEM, CListBox_OnMeasureItem)
         HANDLE_MSG (hwnd, WM_DRAWITEM,    CListBox_OnDrawItem)
     
+    case WM_NOTIFY
+        ' The tooltip asks for its text on demand; supply the current hot row's.
+        dim as NMHDR ptr pnmh = cast(NMHDR ptr, lParam)
+        if pnmh andalso (pnmh->code = TTN_GETDISPINFOW) then
+            dim as CLISTBOX ptr pList = GetListBoxPointer(hwnd)
+            if pList then
+                dim as NMTTDISPINFOW ptr pdi = cast(NMTTDISPINFOW ptr, lParam)
+                dim as integer modelRow = pList->VisibleToModel( pList->nLastHotIdx )
+                ' store in an instance-lifetime buffer and point lpszText at it
+                pList->wszTooltip = CListBox_ResolveTooltipText( pList, modelRow )
+                pdi->lpszText = cast( LPWSTR, pList->wszTooltip.vptr )
+                pdi->hinst    = NULL
+            end if
+            return 0
+        end if
+
     case WM_NCDESTROY
         ' Delete the stored listbox data pointer
         dim as CLISTBOX ptr pList = GetListBoxPointer(hwnd)
-        if pList then 
+        if pList then
             if IsWindow(pList->hToolTip) then DestroyWindow(pList->hToolTip)
             delete(pList)
         end if
@@ -974,6 +990,9 @@ function CListBoxListBox_SubclassProc ( _
                         InvalidateRect( hWin, @rc, FALSE )
                     end if
                     pList->nLastHotIdx = idx
+                    ' Row changed: pop the current tip so it re-queries
+                    ' TTN_GETDISPINFOW for the new row on the next hover.
+                    if pList->hTooltip then SendMessage( pList->hTooltip, TTM_POP, 0, 0 )
                 end if
             end if
             if pList andalso pList->MessageCallback then
@@ -998,10 +1017,8 @@ function CListBoxListBox_SubclassProc ( _
         case WM_MOUSELEAVE
             if pList then
                 pList->nLastHotIdx = -1
-                pList->wszTooltip = ""
-                ' hWin is the child listbox (the subclass target) -- the correct
-                ' handle for the tooltip tool, matching how it was registered.
-                AfxSetTooltipText( pList->hTooltip, hWin, "" )
+                ' The tooltip hides itself when the mouse leaves the tool; nothing
+                ' to push. Just clear the hot row and repaint.
                 AfxRedrawWindow(hWin)
                 if (pList->MessageCallback <> 0) andalso pList->MessageCallback( @m ) then return 0
             end if
@@ -1071,6 +1088,38 @@ end function
 
 
 ' ========================================================================================
+' Create a tooltip that pulls its text on demand (LPSTR_TEXTCALLBACK) for the whole
+' listbox. Notifications (TTN_GETDISPINFOW) go to the tool's owner = the parent form,
+' which answers them in CListBox_WndProc using the current hot row.
+' ========================================================================================
+function CListBox_AddTooltip( byval hCtrl as HWND ) as HWND
+    if IsWindow(hCtrl) = 0 then return 0
+    dim as HWND hTooltip = CreateWindowExW( 0, "tooltips_class32", "", _
+                                            WS_POPUP or TTS_ALWAYSTIP, _
+                                            0, 0, 0, 0, NULL, NULL, NULL, NULL )
+    if hTooltip = 0 then return 0
+    SetWindowPos( hTooltip, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE or SWP_NOSIZE or SWP_NOACTIVATE )
+
+    dim tti as TOOLINFOW
+    ' cbSize must match the running comctl32 version (see AfxNova AfxAddTooltip).
+    #ifdef __FB_64BIT__
+        if AfxComCtlVersion < 600 then tti.cbSize = 64 else tti.cbSize = 72
+    #else
+        if AfxComCtlVersion < 600 then tti.cbSize = 44 else tti.cbSize = 48
+    #endif
+    ' hCtrl is a WS_CHILD (the listbox): register the whole control as one tool
+    ' owned by the parent form, and let the tooltip auto-relay via TTF_SUBCLASS.
+    tti.uFlags   = TTF_IDISHWND or TTF_SUBCLASS
+    tti.hwnd     = GetParent(hCtrl)
+    tti.uId      = cast(UINT_PTR, hCtrl)
+    tti.hinst    = GetModuleHandleW(NULL)
+    tti.lpszText = LPSTR_TEXTCALLBACK
+    SendMessageW( hTooltip, TTM_ADDTOOLW, 0, cast(LPARAM, @tti) )
+    return hTooltip
+end function
+
+
+' ========================================================================================
 ' CListBox_Create
 ' ========================================================================================
 function CListBox_Create( byval hWndParent as HWND, byval CtrlID as integer ) as HWND
@@ -1103,7 +1152,7 @@ function CListBox_Create( byval hWndParent as HWND, byval CtrlID as integer ) as
         LBS_OWNERDRAWFIXED or LBS_NODATA or LBS_NOTIFY, _
         WS_EX_LEFT or WS_EX_RIGHTSCROLLBAR)
         pWindow->SetControlSubclass( hList, @CListBoxListBox_SubclassProc, pList->idc_ListBox, @pWindow )
-    pList->hTooltip = AfxAddTooltip( hList, "", false, false )
+    pList->hTooltip = CListBox_AddTooltip( hList )
 
     function = hForm
     

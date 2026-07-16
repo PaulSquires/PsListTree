@@ -164,8 +164,7 @@ function CListBox_MessageCallback( byval m as CLISTBOX_MESSAGEINFO ptr ) as bool
 
         case WM_MOUSEHOVER
             print "WM_MOUSEHOVER on idx: "; m->idx
-            dim as DWSTRING wszCaption = "Tooltip " & m->idx
-            CListBox_SetTooltip( GetParent(m->hList), wszCaption )
+            ' Tooltips are now on-demand via the tooltip callback; nothing to push.
             return true
             
         case WM_LBUTTONUP
@@ -179,6 +178,17 @@ function CListBox_MessageCallback( byval m as CLISTBOX_MESSAGEINFO ptr ) as bool
     ' Return false to allow to fall to the default windows handler
     return false
 end function    
+
+
+' ========================================================================================
+' CListBox_TooltipCallback  -- per-row tooltip text, resolved on demand
+' ========================================================================================
+function CListBox_TooltipCallback( byval hCtl as HWND, byval row as integer ) as DWSTRING
+    if CListBox_IsHeader( hCtl, row ) then
+        return "Group header: " & CListBox_GetText( hCtl, row )
+    end if
+    return "Row " & row & " -> " & CListBox_GetText( hCtl, row )
+end function
 
 
 ' ========================================================================================
@@ -215,6 +225,7 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
     CListBox_SetMessageCallback( HWND_FRMEXPLORER, @CListBox_MessageCallback )
     CListBox_SetBackColor( HWND_FRMEXPLORER, theme.BackColor )
     CListBox_SetFont( HWND_FRMEXPLORER, ghFont(GUIFONT_10) )
+    CListBox_SetTooltipCallback( HWND_FRMEXPLORER, @CListBox_TooltipCallback )
     CListBox_SetExtendedSelect( HWND_FRMEXPLORER, true )   ' Shift/Ctrl range selection
     ' Two groups; bulk add is batched so the map rebuilds once, not per row.
     CListBox_BeginUpdate( HWND_FRMEXPLORER )
@@ -240,6 +251,7 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
     CListBox_SetMessageCallback( HWND_FRMEXPLORER2, @CListBox_MessageCallback )
     CListBox_SetBackColor( HWND_FRMEXPLORER2, theme.BackColor )
     CListBox_SetFont( HWND_FRMEXPLORER2, ghFont(GUIFONT_10) )
+    CListBox_SetTooltipCallback( HWND_FRMEXPLORER2, @CListBox_TooltipCallback )
     CListBox_BeginUpdate( HWND_FRMEXPLORER2 )
     CListBox_AddHeader( HWND_FRMEXPLORER2, "Files" )              ' model row 0
     for i as integer = 0 to 4

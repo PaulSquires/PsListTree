@@ -36,6 +36,8 @@ end type
 
 type PaintCallbackSub as sub( byval p as CLISTBOX_PAINTINFO ptr )
 type MessageCallbackFunc as function( byval m as CLISTBOX_MESSAGEINFO ptr ) as boolean
+' Return the tooltip text for a MODEL row on demand (empty = no tooltip).
+type TooltipCallbackFunc as function( byval hListControl as HWND, byval row as integer ) as DWSTRING
 
 type CLISTBOX
     hWin            as HWND
@@ -64,6 +66,7 @@ type CLISTBOX
     hFont           as HFONT              ' caller-supplied font for row text (caller owns it)
     PaintCallback   as PaintCallbackSub
     MessageCallback as MessageCallbackFunc
+    TooltipCallback as TooltipCallbackFunc    ' optional; defaults to the row's Text
 
     declare function GetCount() as integer                                  ' model row count
     declare function GetVisibleCount() as integer
@@ -303,7 +306,7 @@ declare function CListBox_GetFont( byval hListControl as HWND ) as HFONT
 declare function CListBox_SetFont( byval hListControl as HWND, byval hFont as HFONT ) as boolean
 declare function CListBox_GetCount( byval hListControl as HWND ) as integer
 declare function CListBox_SetMessageCallback( byval hListControl as HWND, byval userfunc as MessageCallbackFunc ) as boolean
-declare sub      CListBox_SetHoverTime( byval hListControl as HWND, byval milliseconds as integer ) 
-declare sub      CListBox_SetTooltip( byval hListControl as HWND, byval wszTooltip as DWSTRING )
+declare sub      CListBox_SetHoverTime( byval hListControl as HWND, byval milliseconds as integer )
+declare sub      CListBox_SetTooltipCallback( byval hListControl as HWND, byval userfunc as TooltipCallbackFunc )
 declare sub      CListBox_Refresh( byval hListControl as HWND )
 declare sub      CListBox_SetPaintCallback( byval hListControl as HWND, byval usersub as PaintCallbackSub )
