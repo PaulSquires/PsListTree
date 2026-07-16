@@ -170,13 +170,8 @@ function CListBox_MessageCallback( byval m as CLISTBOX_MESSAGEINFO ptr ) as bool
             
         case WM_LBUTTONUP
             print "WM_LBUTTONUP on idx: "; m->idx
-            ' Clicking a header row toggles its collapsed state.
-            dim as HWND hCtl = GetParent(m->hList)
-            if CListBox_IsHeader( hCtl, m->idx ) then
-                CListBox_ToggleRow( hCtl, m->idx )
-            end if
-            ' Return True because we processed this message and do not want
-            ' the default windows handler to process it also.
+            ' Header collapse/expand is now handled inside the control on the
+            ' mouse-down, and it preserves the current selection.
             return true
     
     end select

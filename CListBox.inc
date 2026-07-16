@@ -856,8 +856,16 @@ function CListBoxListBox_SubclassProc ( _
             if pList andalso hiword(idx) <> 1 then
                 dim as integer modelRow = pList->VisibleToModel( idx )
                 m.idx = modelRow
-                ' Update the model selection before the host callback runs.
-                CListBox_ApplyClickSelection( pList, modelRow, m.isCtrl, m.isShift )
+                dim as CLISTBOX_ROWINFO ptr pRow = pList->GetRow( modelRow )
+                if (pRow <> 0) andalso pRow->IsHeader then
+                    ' Header: clicking toggles the group collapse and deliberately
+                    ' leaves the selection untouched (a fold gesture, not a select).
+                    pRow->bCollapsed = not pRow->bCollapsed
+                    pList->NotifyChange()
+                else
+                    ' Item: apply the mouse selection to the model.
+                    CListBox_ApplyClickSelection( pList, modelRow, m.isCtrl, m.isShift )
+                end if
                 if pList->MessageCallback then
                     if pList->MessageCallback( @m ) then return 0
                 end if
