@@ -52,6 +52,7 @@ end function
 ' Overload that provides an hDC rather than use BeginPaint/EndPaint
 function clsDoubleBuffer.BeginDoubleBuffer( byval hwnd as HWND, byval hdc as HDC, byval rcItem as RECT ) as long
     _UsePaint = false
+    _owns = true
     _hwnd = hwnd
     _hDC = hdc
     _rc = rcItem
@@ -59,21 +60,42 @@ function clsDoubleBuffer.BeginDoubleBuffer( byval hwnd as HWND, byval hdc as HDC
     function = 0
 end function
 
+' Cached overload: draw into a caller-owned memDC (bitmap already selected and
+' large enough). Saves DC state so per-row object selections don't accumulate;
+' EndDoubleBuffer blits but does not delete the DC/bitmap (the caller owns them).
+function clsDoubleBuffer.BeginDoubleBuffer( byval hwnd as HWND, byval hdc as HDC, byval rcItem as RECT, byval cachedMemDC as HDC ) as long
+    _UsePaint = false
+    _owns = false
+    _hwnd = hwnd
+    _hDC = hdc
+    _rc = rcItem
+    _memDC = cachedMemDC
+    _hbit = 0
+    SaveDC( _memDC )
+    function = 0
+end function
+
 function clsDoubleBuffer.EndDoubleBuffer() as long
     BitBlt( _hDC, _rc.left, _rc.top, _rc.right - _rc.left, _rc.bottom - _rc.top, _memDC, 0, 0, SRCCOPY )
     RestoreDC( _memDC, -1 )
-    if _hbit  then DeleteObject( _hbit ) : _hbit = 0
-    if _memDC then DeleteDC( _memDC )    : _memDC = 0
+    if _owns then
+        if _hbit  then DeleteObject( _hbit ) : _hbit = 0
+        if _memDC then DeleteDC( _memDC )    : _memDC = 0
+    else
+        _memDC = 0    ' cached DC is owned by the caller; do not delete
+    end if
     if _UsePaint then EndPaint( _hwnd, @_ps ) : _UsePaint = false
     function = 0
 end function
 
 ' RAII safety net: release any GDI objects still held if EndDoubleBuffer was
-' not reached (e.g. an early return between Begin and End). Handles are nulled
-' by EndDoubleBuffer, so this never double-frees on the normal path.
+' not reached (e.g. an early return between Begin and End). Only frees objects
+' this instance owns; handles are nulled by End, so this never double-frees.
 destructor clsDoubleBuffer()
-    if _hbit  then DeleteObject( _hbit ) : _hbit = 0
-    if _memDC then DeleteDC( _memDC )    : _memDC = 0
+    if _owns then
+        if _hbit  then DeleteObject( _hbit ) : _hbit = 0
+        if _memDC then DeleteDC( _memDC )    : _memDC = 0
+    end if
     if _UsePaint andalso (_hwnd <> 0) then EndPaint( _hwnd, @_ps ) : _UsePaint = false
 end destructor
 

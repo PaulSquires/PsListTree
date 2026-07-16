@@ -31,12 +31,16 @@ type clsDoubleBuffer
         _backcolorhot    as COLORREF
         _hFont           as HFONT         ' caller-supplied font; the control/host owns it
         _UsePaint        as boolean       ' use Begin/EndPaint. Used when WM_PAINT or WM_DRAWITEM
+        _owns            as boolean = true ' does this object own _memDC/_hbit (delete on End)?
 
     public:
 
     declare destructor()
     declare function BeginDoubleBuffer( byval hwnd as HWND ) as long
     declare function BeginDoubleBuffer( byval hwnd as HWND, byval hdc as HDC, byval rcItem as RECT ) as long
+    ' Cached variant: reuse a caller-owned memDC (with its bitmap already selected);
+    ' EndDoubleBuffer will blit but NOT delete it. Used to avoid per-row GDI churn.
+    declare function BeginDoubleBuffer( byval hwnd as HWND, byval hdc as HDC, byval rcItem as RECT, byval cachedMemDC as HDC ) as long
     declare function EndDoubleBuffer() as long
     declare function PaintClientRect() as long 
     declare function SetupBitmap() as long
