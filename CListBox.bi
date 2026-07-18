@@ -40,6 +40,7 @@ type CLISTBOX_ROWINFO
     selected        as boolean = false    ' selection is stored in the model, not the listbox
     Text            as DWSTRING
     itemData        as integer
+    itemDataExtra   as integer
 end type
 
 ' Draw one row. Called for each visible row on every repaint; keep it cheap. Paint through
@@ -80,6 +81,8 @@ type CLISTBOX
     hotTimerOn      as boolean = false    ' is the hot-tracking safety-net timer running?
     focusRow        as integer = -1       ' MODEL row with the keyboard focus/caret (-1 = none)
     anchorRow       as integer = -1       ' MODEL row anchoring a shift-range selection
+    topRow          as integer = 0        ' MODEL row that should be first displayed; the scroll
+                                          ' source of truth the Win32 listbox is re-derived from
     ExtendSel       as boolean = false
     MultipleSel     as boolean = false
     BackColor       as COLORREF
@@ -130,6 +133,8 @@ end type
 ' Defined in CListBox.inc, but CLISTBOX.Refresh (below) has to call it -- push the
 ' scrollbar's range/visibility to match the current model + scroll position.
 declare sub      CListBox_SyncScrollBar( byval pList as CLISTBOX ptr )
+declare sub      CListBox_SyncListboxFromModel( byval pList as CLISTBOX ptr )
+declare sub      CListBox_CaptureTopRow( byval pList as CLISTBOX ptr )
 declare function CListBox_ItemsPerPage( byval pList as CLISTBOX ptr ) as integer
 declare function CListBox_PositionWindows( byval hwnd as HWND ) as LRESULT
 
@@ -203,10 +208,11 @@ function CLISTBOX.InsertRowAt( byval modelRow as integer ) as CLISTBOX_ROWINFO p
 
     ' reset the new slot (frees any DWSTRING left in a recycled capacity slot)
     with this.rows(modelRow)
-        .IsHeader   = false
-        .bCollapsed = false
-        .Text       = ""
-        .itemData   = 0
+        .IsHeader      = false
+        .bCollapsed    = false
+        .Text          = ""
+        .itemData      = 0
+        .itemDataExtra = 0
     end with
 
     this.rowCount += 1
@@ -239,8 +245,9 @@ sub CLISTBOX.Clear()
 end sub
 
 ' Rebuild the visible map from the model (flat, one-level grouping: an item is
-' hidden iff its nearest preceding header is collapsed) and push the visible
-' count into the LBS_NODATA listbox.
+' hidden iff its nearest preceding header is collapsed). Pure model: pushing the
+' new count into the Win32 listbox is CListBox_SyncListboxFromModel's job, because
+' LB_SETCOUNT resets the listbox's scroll and caret and the sync re-derives both.
 sub CLISTBOX.RebuildVisibleMap()
     this.visibleCount = 0
     if this.rowCount > 0 then
@@ -259,8 +266,6 @@ sub CLISTBOX.RebuildVisibleMap()
     else
         erase this.visibleMap
     end if
-    dim as HWND hList = GetDlgItem( this.hWin, this.idc_ListBox )
-    if hList then SendMessage( hList, LB_SETCOUNT, this.visibleCount, 0 )
 end sub
 
 function CLISTBOX.ModelToVisible( byval modelRow as integer ) as integer
@@ -330,16 +335,21 @@ sub CLISTBOX.NotifyChange()
 end sub
 
 sub CLISTBOX.Refresh()
+    ' Capture the listbox's actual scroll position back into the model BEFORE the
+    ' rebuild: the sync below pushes LB_SETCOUNT (which resets the Win32 listbox's
+    ' top and caret), and the OLD visibleMap still matches the listbox contents at
+    ' this point, so the translation is valid. This is what lets a scroll made by
+    ' the user (wheel / keyboard / scrollbar) survive any rebuild.
+    CListBox_CaptureTopRow( @this )
     this.RebuildVisibleMap()
     dim as HWND hList = GetDlgItem( this.hWin, this.idc_ListBox )
     if hList = 0 then exit sub
     ShowWindow( hList, SW_SHOW )
-    ' Repaint WITH background erase so the vacated region below the last row is
-    ' cleared when the list shrinks (delete / collapse).
+    ' Re-derive the Win32 listbox (count, caret, top row) and the scrollbar from
+    ' the model, then repaint WITH background erase so the vacated region below the
+    ' last row is cleared when the list shrinks (delete / collapse).
+    CListBox_SyncListboxFromModel( @this )
     InvalidateRect( hList, NULL, TRUE )
-    ' The visible row count may have changed, so the scrollbar range (and whether it
-    ' is needed at all) has to follow.
-    CListBox_SyncScrollBar( @this )
 end sub
 
 
@@ -385,9 +395,9 @@ declare function CListBox_Create( byval hWndParent as HWND, byval CtrlID as inte
 ' Wrap bulk loads in BeginUpdate/EndUpdate: it collapses the per-row rebuild+repaint into
 ' one, turning an O(n^2) load into O(n). The pairs nest.
 ' ----------------------------------------------------------------------------------------
-declare function CListBox_AddString( byval hListControl as HWND, byval Text as DWSTRING, byval itemData as integer = 0 ) as integer
-declare function CListBox_AddHeader( byval hListControl as HWND, byval Text as DWSTRING, byval itemData as integer = 0 ) as integer
-declare function CListBox_InsertString( byval hListControl as HWND, byval row as integer, byval Text as DWSTRING, byval itemData as integer = 0 ) as integer
+declare function CListBox_AddString( byval hListControl as HWND, byval Text as DWSTRING, byval itemData as integer = 0, byval itemDataExtra as integer = 0 ) as integer
+declare function CListBox_AddHeader( byval hListControl as HWND, byval Text as DWSTRING, byval itemData as integer = 0, byval itemDataExtra as integer = 0 ) as integer
+declare function CListBox_InsertString( byval hListControl as HWND, byval row as integer, byval Text as DWSTRING, byval itemData as integer = 0, byval itemDataExtra as integer = 0 ) as integer
 declare function CListBox_DeleteString( byval hListControl as HWND, byval row as integer ) as boolean
 declare sub      CListBox_Clear( byval hListControl as HWND )
 declare sub      CListBox_BeginUpdate( byval hListControl as HWND )
@@ -408,6 +418,8 @@ declare function CListBox_GetText( byval hListControl as HWND, byval row as inte
 declare function CListBox_SetText( byval hListControl as HWND, byval row as integer, byval Text as DWSTRING ) as boolean
 declare function CListBox_GetItemData( byval hListControl as HWND, byval row as integer ) as integer
 declare function CListBox_SetItemData( byval hListControl as HWND, byval row as integer, byval itemData as integer ) as boolean
+declare function CListBox_GetItemDataExtra( byval hListControl as HWND, byval row as integer ) as integer
+declare function CListBox_SetItemDataExtra( byval hListControl as HWND, byval row as integer, byval itemDataExtra as integer ) as boolean
 
 ' ----------------------------------------------------------------------------------------
 ' Groups / collapsing.  Collapse/Expand/Toggle act only on header rows and return FALSE
@@ -419,6 +431,8 @@ declare function CListBox_IsCollapsed( byval hListControl as HWND, byval row as 
 declare function CListBox_CollapseRow( byval hListControl as HWND, byval row as integer ) as boolean
 declare function CListBox_ExpandRow( byval hListControl as HWND, byval row as integer ) as boolean
 declare function CListBox_ToggleRow( byval hListControl as HWND, byval row as integer ) as boolean
+declare function CListBox_CollapseAll( byval hListControl as HWND ) as boolean
+declare function CListBox_ExpandAll( byval hListControl as HWND ) as boolean
 
 ' ----------------------------------------------------------------------------------------
 ' Selection.  Selection is stored on the rows, so it survives collapse/expand and can
@@ -438,6 +452,8 @@ declare function CListBox_GetSelItems( byval hListControl as HWND, selItems() as
 declare sub      CListBox_SelectAll( byval hListControl as HWND, byval state as boolean )
 declare function CListBox_SetMultiSelect( byval hListControl as HWND, byval enable as boolean ) as boolean
 declare function CListBox_SetExtendedSelect( byval hListControl as HWND, byval enable as boolean ) as boolean
+declare function CListBox_GetTopIndex( byval hListControl as HWND ) as integer
+declare function CListBox_SetTopIndex( byval hListControl as HWND, byval row as integer ) as integer
 
 ' ----------------------------------------------------------------------------------------
 ' Appearance.  Row height is in unscaled units and is DPI-scaled internally. The font is

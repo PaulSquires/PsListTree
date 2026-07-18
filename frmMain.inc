@@ -270,7 +270,7 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
     CListBox_SetMultiSelect( HWND_FRMEXPLORER2, true )     ' checklist style: click toggles
     CListBox_BeginUpdate( HWND_FRMEXPLORER2 )
     CListBox_AddHeader( HWND_FRMEXPLORER2, "Files" )              ' model row 0
-    for i as integer = 0 to 4
+    for i as integer = 0 to 40
         CListBox_AddString( HWND_FRMEXPLORER2, "file" & i & ".bas", i )   ' rows 1..5
     next
     CListBox_AddHeader( HWND_FRMEXPLORER2, "Folders" )           ' model row 6

@@ -47,13 +47,14 @@ end function
 ' ========================================================================================
 ' Add a string (and optional itemData) to the end of the custom listbox control.
 ' ========================================================================================
-function CListBox_AddString( byval hListControl as HWND, byval Text as DWSTRING, byval itemData as integer = 0 ) as integer
+function CListBox_AddString( byval hListControl as HWND, byval Text as DWSTRING, byval itemData as integer = 0, byval itemDataExtra as integer = 0 ) as integer
     dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return -1
     dim as CLISTBOX_ROWINFO ptr pRow = pList->AddRow()
     if pRow = null then return -1
     pRow->Text = Text
     pRow->itemData = itemData
+    pRow->itemDataExtra = itemDataExtra
     return pList->GetCount() - 1  ' model index of the appended row
 end function
 
@@ -62,7 +63,7 @@ end function
 ' Append a header (group) row. Child items added after it belong to this group
 ' until the next header. Returns the header's model index.
 ' ========================================================================================
-function CListBox_AddHeader( byval hListControl as HWND, byval Text as DWSTRING, byval itemData as integer = 0 ) as integer
+function CListBox_AddHeader( byval hListControl as HWND, byval Text as DWSTRING, byval itemData as integer = 0, byval itemDataExtra as integer = 0 ) as integer
     dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return -1
     dim as CLISTBOX_ROWINFO ptr pRow = pList->AddRow()
@@ -70,6 +71,7 @@ function CListBox_AddHeader( byval hListControl as HWND, byval Text as DWSTRING,
     pRow->IsHeader = true
     pRow->Text = Text
     pRow->itemData = itemData
+    pRow->itemDataExtra = itemDataExtra
     return pList->GetCount() - 1
 end function
 
@@ -78,7 +80,7 @@ end function
 ' Insert a row at the given MODEL index (existing rows shift down). Returns the
 ' actual index used (clamped to [0, count]), or -1 on failure.
 ' ========================================================================================
-function CListBox_InsertString( byval hListControl as HWND, byval row as integer, byval Text as DWSTRING, byval itemData as integer = 0 ) as integer
+function CListBox_InsertString( byval hListControl as HWND, byval row as integer, byval Text as DWSTRING, byval itemData as integer = 0, byval itemDataExtra as integer = 0 ) as integer
     dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return -1
     dim as integer at = row
@@ -88,6 +90,7 @@ function CListBox_InsertString( byval hListControl as HWND, byval row as integer
     if pRow = null then return -1
     pRow->Text = Text
     pRow->itemData = itemData
+    pRow->itemDataExtra = itemDataExtra
     return at
 end function
 
@@ -155,6 +158,33 @@ function CListBox_ExpandRow( byval hListControl as HWND, byval row as integer ) 
     end if
     return true
 end function
+
+function CListBox_ExpandAll( byval hListControl as HWND ) as boolean
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return false
+    dim as CLISTBOX_ROWINFO ptr pRow
+    for i as integer = 0 to pList->rowCount - 1
+        pRow = pList->GetRow(i)
+        if (pRow = null) orelse (pRow->IsHeader = false) then continue for
+        if pRow->bCollapsed then pRow->bCollapsed = false
+    next
+    pList->NotifyChange()
+    return true
+end function
+
+function CListBox_CollapseAll( byval hListControl as HWND ) as boolean
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return false
+    dim as CLISTBOX_ROWINFO ptr pRow
+    for i as integer = 0 to pList->rowCount - 1
+        pRow = pList->GetRow(i)
+        if (pRow = null) orelse (pRow->IsHeader = false) then continue for
+        if pRow->bCollapsed = false then pRow->bCollapsed = true
+    next
+    pList->NotifyChange()
+    return true
+end function
+
 
 function CListBox_ToggleRow( byval hListControl as HWND, byval row as integer ) as boolean
     dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
@@ -271,13 +301,23 @@ end sub
 
 ' ========================================================================================
 ' Set specified row itemData for the custom listbox control.
-' ========================================================================================
 ' Returns TRUE on success, FALSE if the row index is invalid.
+' ========================================================================================
 function CListBox_SetItemData( byval hListControl as HWND, byval row as integer, byval itemData as integer ) as boolean
     dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return false
     if pList->IsValidRow(row) then
         pList->GetRow(row)->itemData = itemData
+        return true     ' success
+    end if
+    return false  ' invalid row
+end function
+
+function CListBox_SetItemDataExtra( byval hListControl as HWND, byval row as integer, byval itemDataExtra as integer ) as boolean
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return false
+    if pList->IsValidRow(row) then
+        pList->GetRow(row)->itemDataExtra = itemDataExtra
         return true     ' success
     end if
     return false  ' invalid row
@@ -292,6 +332,13 @@ function CListBox_GetItemData( byval hListControl as HWND, byval row as integer 
     if pList = null then return 0
     if pList->IsValidRow(row) = false then return 0
     return pList->GetRow(row)->itemData
+end function
+
+function CListBox_GetItemDataExtra( byval hListControl as HWND, byval row as integer ) as integer
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return 0
+    if pList->IsValidRow(row) = false then return 0
+    return pList->GetRow(row)->itemDataExtra
 end function
 
 
@@ -317,17 +364,66 @@ function CListBox_SetCurSel( byval hListControl as HWND, byval row as integer ) 
         pList->ClearSelection()
         pList->focusRow  = -1
         pList->anchorRow = -1
+        CListBox_SyncListboxFromModel( pList )
         if hList then InvalidateRect( hList, NULL, FALSE )
         return -1
     end if
     pList->SelectOnly( row )
     pList->focusRow  = row
     pList->anchorRow = row
-    ' keep the listbox caret in sync (for scrolling) when the row is visible
+    ' Ensure-visible, decided in the MODEL: if the new caret is outside the current
+    ' page, move topRow so the caret lands on-page (above -> caret at top; below ->
+    ' caret at bottom). The Win32 listbox is then re-derived, never asked to scroll
+    ' on its own. A row hidden under a collapsed header stays where it is.
     dim as integer visRow = pList->ModelToVisible( row )
-    if (hList andalso visRow >= 0) then ListBox_SetCurSel( hList, visRow )
+    if (hList <> 0) andalso (visRow >= 0) then
+        dim as integer visTop  = SendMessage( hList, LB_GETTOPINDEX, 0, 0 )
+        dim as integer perPage = CListBox_ItemsPerPage( pList )
+        if perPage < 1 then perPage = 1
+        if visRow < visTop then
+            pList->topRow = row
+        elseif visRow >= visTop + perPage then
+            pList->topRow = pList->VisibleToModel( visRow - perPage + 1 )
+        end if
+    end if
+    CListBox_SyncListboxFromModel( pList )
     if hList then InvalidateRect( hList, NULL, FALSE )
     return row
+end function
+
+
+' ========================================================================================
+' Retrieve the top (first displayed) row as a MODEL index, or -1 if the list is empty
+' or the control is invalid.
+' The Win32 listbox scrolls in VISIBLE index space, so the raw LB_GETTOPINDEX value is
+' translated back through the visible map before being returned.
+' ========================================================================================
+function CListBox_GetTopIndex( byval hListControl as HWND ) as integer
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return -1
+    if pList->visibleCount = 0 then return -1
+    dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
+    if hList = 0 then return -1
+    dim as integer visTop = SendMessage( hList, LB_GETTOPINDEX, 0, 0 )
+    return pList->VisibleToModel( visTop )
+end function
+
+
+' ========================================================================================
+' Scroll the listbox so the given MODEL row is the top row, by setting the model's
+' topRow and re-deriving the Win32 listbox from it. A row hidden under a collapsed
+' header resolves to its group header (inside the sync), so callers may pass any valid
+' model row without checking collapse state. The listbox clamps the scroll for itself
+' and the clamp is mirrored back, so the returned value is the MODEL row actually at
+' the top. Returns -1 if the row or control is invalid.
+' ========================================================================================
+function CListBox_SetTopIndex( byval hListControl as HWND, byval row as integer ) as integer
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return -1
+    if pList->IsValidRow(row) = false then return -1
+    pList->topRow = row
+    CListBox_SyncListboxFromModel( pList )
+    return pList->topRow
 end function
 
 
@@ -588,6 +684,10 @@ sub CListBox_OnScrollBarScroll( byval hSB as HWND, byval newPos as integer )
     ' never show a position the list isn't at. SetPos does not re-enter the callback.
     dim as integer actual = SendMessage( hList, LB_GETTOPINDEX, 0, 0 )
     if actual <> newPos then CVScrollBar_SetPos( hSB, actual )
+    ' Keep the model's scroll source-of-truth in step with the user's scroll, so a
+    ' later rebuild or show re-derives to where the user actually left the list.
+    dim as integer modelTop = pList->VisibleToModel( actual )
+    if modelTop >= 0 then pList->topRow = modelTop
 end sub
 
 
@@ -615,6 +715,79 @@ sub CListBox_SyncScrollBar( byval pList as CLISTBOX ptr )
         ShowWindow( pList->hScrollBar, iif( needed, SW_SHOW, SW_HIDE ) )
         CListBox_PositionWindows( pList->hWin )   ' listbox reclaims / gives up the strip
     end if
+end sub
+
+
+' ========================================================================================
+' Pull the Win32 listbox's ACTUAL top row back into the model (topRow). Only valid
+' while visibleMap still matches the listbox contents -- i.e. BEFORE a rebuild. Called
+' at the top of Refresh (so user scrolls survive rebuilds) and when the control is
+' shown (so scrolls made through paths that bypass the model are absorbed).
+' ========================================================================================
+sub CListBox_CaptureTopRow( byval pList as CLISTBOX ptr )
+    if pList = 0 then return
+    if pList->visibleCount = 0 then return
+    dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
+    if hList = 0 then return
+    dim as integer modelRow = pList->VisibleToModel( SendMessage( hList, LB_GETTOPINDEX, 0, 0 ) )
+    if modelRow >= 0 then pList->topRow = modelRow
+end sub
+
+
+' ========================================================================================
+' Re-derive the Win32 listbox (count, caret, top row) and the scrollbar from the MODEL.
+' The listbox is a view: it never holds state the model does not, so after any model
+' change -- and whenever the control is shown -- this one routine re-converges it.
+' LB_SETCOUNT resets the listbox's scroll and caret, which is exactly why both are
+' re-pushed afterwards, in this order: caret first (LB_SETCURSEL scrolls the caret
+' into view), then the top row, so topRow is the final authority on scroll position.
+' The listbox clamps the scroll for itself; the clamped result is mirrored back into
+' topRow so the model always reflects what is actually on screen.
+' ========================================================================================
+sub CListBox_SyncListboxFromModel( byval pList as CLISTBOX ptr )
+    if pList = 0 then return
+    dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
+    if hList = 0 then return
+
+    SendMessage( hList, LB_SETCOUNT, pList->visibleCount, 0 )
+
+    if pList->visibleCount = 0 then
+        pList->topRow = 0
+        CListBox_SyncScrollBar( pList )
+        return
+    end if
+
+    ' Caret (single-select styles only: LB_SETCURSEL is LB_ERR on multi-select
+    ' listboxes, where selection is painted from the model's per-row flags anyway).
+    ' A focusRow of -1, or one hidden under a collapsed header, clears the caret.
+    if (pList->MultipleSel = false) andalso (pList->ExtendSel = false) then
+        ListBox_SetCurSel( hList, pList->ModelToVisible( pList->focusRow ) )
+    end if
+
+    ' Top row: largest visible slot whose model row is <= topRow (visibleMap is
+    ' strictly ascending, so binary search). A topRow hidden inside a collapsed
+    ' group lands on its group header.
+    dim as integer row = pList->topRow
+    if row < 0 then row = 0
+    if row > pList->rowCount - 1 then row = pList->rowCount - 1
+    dim as integer lo = 0
+    dim as integer hi = pList->visibleCount - 1
+    dim as integer visRow = 0
+    do while lo <= hi
+        dim as integer midRow = (lo + hi) \ 2
+        if pList->visibleMap(midRow) <= row then
+            visRow = midRow
+            lo = midRow + 1
+        else
+            hi = midRow - 1
+        end if
+    loop
+    SendMessage( hList, LB_SETTOPINDEX, visRow, 0 )
+
+    ' Mirror what the listbox actually did back into the model and the scrollbar.
+    dim as integer actualTop = pList->VisibleToModel( SendMessage( hList, LB_GETTOPINDEX, 0, 0 ) )
+    if actualTop >= 0 then pList->topRow = actualTop
+    CListBox_SyncScrollBar( pList )
 end sub
 
 
@@ -780,6 +953,18 @@ function CListBox_WndProc( _
                 pdi->hinst    = NULL
             end if
             return 0
+        end if
+
+    case WM_SHOWWINDOW
+        ' Becoming visible: re-converge the derived Win32 listbox state from the
+        ' model. Anything pushed while the control was hidden never reached the
+        ' screen, and a scroll made through a path that bypasses the model (wheel,
+        ' keyboard) lives only in the listbox -- capture it first so the sync
+        ' converges on it instead of snapping back to a stale topRow.
+        if wParam then
+            dim as CLISTBOX ptr pList = GetListBoxPointer(hwnd)
+            CListBox_CaptureTopRow( pList )
+            CListBox_SyncListboxFromModel( pList )
         end if
 
     case WM_NCDESTROY
