@@ -502,6 +502,24 @@ function CListBox_SetExtendedSelect( byval hListControl as HWND, byval enable as
     return true
 end function
 
+' ========================================================================================
+' Opt out of double-click behavior. With CS_DBLCLKS a double-click delivers
+' down, up, DBLCLK, up -- the dblclk *substitutes* for the second down, so the host
+' callback sees two WM_LBUTTONUPs and acts twice. When enabled here, the dblclk gets
+' the plain-click treatment in the MODEL (selection / header toggle still apply) but
+' is never surfaced to the host, and the trailing second WM_LBUTTONUP is not
+' forwarded either: the host observes exactly one down/up pair per double-click.
+' The default listbox handling still runs for every message (it owns the mouse
+' capture), so the down->up capture pairing is untouched.
+' ========================================================================================
+function CListBox_PreventDoubleClick( byval hListControl as HWND, byval enable as boolean = true ) as boolean
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return false
+    pList->PreventDblClick = enable
+    if enable = false then pList->skipNextLBtnUp = false
+    return true
+end function
+
 
 ' ========================================================================================
 ' Retrieve the row height from the custom listbox control.
@@ -1354,6 +1372,10 @@ function CListBoxListBox_SubclassProc ( _
             
 
         case WM_LBUTTONDOWN
+            ' A fresh press means any armed double-click up-skip lost its pairing
+            ' partner (capture change, focus loss) -- disarm it so it cannot eat
+            ' this press's own release.
+            if pList then pList->skipNextLBtnUp = false
             dim as long idx = Listbox_ItemFromPoint( hWin, GET_X_LPARAM(_lParam), GET_Y_LPARAM(_lParam))
             if pList andalso hiword(idx) <> 1 then
                 dim as integer modelRow = pList->VisibleToModel( idx )
@@ -1376,8 +1398,17 @@ function CListBoxListBox_SubclassProc ( _
 
 
         case WM_LBUTTONUP
+            ' If a suppressed double-click armed the skip, this up is that press's
+            ' release: consume the flag and do not surface it to the host callback.
+            ' (Consume regardless of where the release lands, or a later legitimate
+            ' up would be eaten instead.) Default handling still runs below.
+            dim as boolean skipNotify = false
+            if (pList <> 0) andalso (pList->skipNextLBtnUp = true) then
+                pList->skipNextLBtnUp = false
+                skipNotify = true
+            end if
             dim as long idx = Listbox_ItemFromPoint( hWin, GET_X_LPARAM(_lParam), GET_Y_LPARAM(_lParam))
-            if hiword(idx) <> 1 then
+            if (hiword(idx) <> 1) andalso (skipNotify = false) then
                 ' idx is a VISIBLE index; the callback sees MODEL indices.
                 if pList then m.idx = pList->VisibleToModel( idx )
                 if pList andalso pList->MessageCallback then
@@ -1398,7 +1429,33 @@ function CListBoxListBox_SubclassProc ( _
             ' The return value contains the index of the nearest item in the LOWORD. The HIWORD is zero
             ' if the specified point is in the client area of the list box, or one if it is outside the
             ' client area.
-            if hiword(idx) <> 1 then
+            dim as boolean suppressDblClk = false
+            if (uMsg = WM_LBUTTONDBLCLK) andalso (pList <> 0) then
+                suppressDblClk = pList->PreventDblClick
+            end if
+            if suppressDblClk then
+                ' Double-click opt-out: this message SUBSTITUTES for the pair's second
+                ' WM_LBUTTONDOWN, so give it the plain-click treatment in the model
+                ' (header toggle / selection) but never surface it to the host, and
+                ' arm the skip so the trailing second WM_LBUTTONUP is not forwarded
+                ' either -- the host sees exactly one down/up pair per double-click.
+                ' Armed even for an outside-items press: the second up arrives
+                ' regardless of where the press landed. Default handling still runs
+                ' below (the listbox takes capture on the dblclk like a down).
+                pList->skipNextLBtnUp = true
+                if hiword(idx) <> 1 then
+                    dim as integer modelRow = pList->VisibleToModel( idx )
+                    dim as CLISTBOX_ROWINFO ptr pRow = pList->GetRow( modelRow )
+                    if pRow <> 0 then
+                        if pRow->IsHeader then
+                            pRow->bCollapsed = not pRow->bCollapsed
+                            pList->NotifyChange()
+                        else
+                            CListBox_ApplyClickSelection( pList, modelRow, m.isCtrl, m.isShift )
+                        end if
+                    end if
+                end if
+            elseif hiword(idx) <> 1 then
                 ' idx is a VISIBLE index; the callback sees MODEL indices.
                 if pList then m.idx = pList->VisibleToModel( idx )
                 if pList andalso pList->MessageCallback then

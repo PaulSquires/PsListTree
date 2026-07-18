@@ -85,6 +85,10 @@ type CLISTBOX
                                           ' source of truth the Win32 listbox is re-derived from
     ExtendSel       as boolean = false
     MultipleSel     as boolean = false
+    PreventDblClick as boolean = false    ' host opt-out of double-click: the dblclk becomes a
+                                          ' plain click and its trailing second up is not forwarded
+    skipNextLBtnUp  as boolean = false    ' armed by a suppressed dblclk; consumed by the next
+                                          ' WM_LBUTTONUP, disarmed by any fresh WM_LBUTTONDOWN
     BackColor       as COLORREF
     hFont           as HFONT              ' caller-supplied font for row text (caller owns it)
     ' --- Owner-drawn vertical scrollbar, created and driven by this control. It is
@@ -452,6 +456,7 @@ declare function CListBox_GetSelItems( byval hListControl as HWND, selItems() as
 declare sub      CListBox_SelectAll( byval hListControl as HWND, byval state as boolean )
 declare function CListBox_SetMultiSelect( byval hListControl as HWND, byval enable as boolean ) as boolean
 declare function CListBox_SetExtendedSelect( byval hListControl as HWND, byval enable as boolean ) as boolean
+declare function CListBox_PreventDoubleClick( byval hListControl as HWND, byval enable as boolean = true ) as boolean
 declare function CListBox_GetTopIndex( byval hListControl as HWND ) as integer
 declare function CListBox_SetTopIndex( byval hListControl as HWND, byval row as integer ) as integer
 
