@@ -9,7 +9,7 @@ function frmMain_OnPaint( byval hwnd as HWND ) as LRESULT
     dim as clsDoubleBuffer b
 
     b.BeginDoubleBuffer(hwnd)
-    b.SetBackColors( theme.BackColorPanel, theme.BackColorPanel )
+    b.SetBackColor( theme.BackColorPanel )
     b.PaintClientRect()
 
     b.EndDoubleBuffer()
@@ -121,8 +121,8 @@ sub CListBox_PaintCallback( byval p as CLISTBOX_PAINTINFO ptr )
         backclr = theme.BackColor
         foreclr = theme.ForeColor
     end if
-    p->b->SetForeColors(foreclr, foreclr)
-    p->b->SetBackColors(backclr, backclr)
+    p->b->SetForeColor( foreclr )
+    p->b->SetBackColor( backclr )
 
     ' Paint the entire row background
     p->b->PaintRect( @p->rc )
@@ -145,7 +145,7 @@ sub CListBox_PaintCallback( byval p as CLISTBOX_PAINTINFO ptr )
     if p->isFocused then
         dim as RECT rcBar = p->rc
         rcBar.right = rcBar.left + 3
-        p->b->SetBackColors( theme.FocusAccent, theme.FocusAccent )
+        p->b->SetBackColor( theme.FocusAccent )
         p->b->PaintRect( @rcBar )
     end if
 
