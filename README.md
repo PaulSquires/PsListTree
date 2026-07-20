@@ -17,7 +17,7 @@ Any number of instances can coexist; each owns all of its state.
 | File | Purpose |
 |---|---|
 | `CListBox.bi` / `.inc` | The control. `CListBox.bi` is the documented public header. |
-| `CVScrollBar.bi` / `.inc` | Owner-drawn vertical scrollbar (standalone; CListBox drives it) |
+| `CVScrollBar.bi` / `.inc` | **Vendored build copy** of the scrollbar CListBox embeds. Canonical home: [CVScrollBar](https://github.com/PaulSquires/CVScrollBar) — develop there, sync copies here (the same way tiko vendors its control copies). |
 | `clsDoubleBuffer.bi` / `.inc` | Flicker-free drawing helper used by both |
 | `main.bas`, `frmMain.bi` / `.inc` | Demo / test harness (two instances) |
 
