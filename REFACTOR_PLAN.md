@@ -246,7 +246,7 @@ Resolved design decisions:
 - New `CVScrollBar.bi` / `CVScrollBar.inc` following the CListBox conventions; delete
   `frmVScrollBar.inc`.
 - Per-instance `CVSCROLLBAR` on the heap in `pWindow->UserData(0)` (fetched via a
-  `GetScrollBarPointer` helper). **Every** global/static in the sketch becomes an instance field:
+  `GetVScrollBarPointer` helper). **Every** global/static in the sketch becomes an instance field:
   `gPanelVScroll` (frmVScrollBar.inc:10), `HWND_FRMPANEL`/`HWND_VSCROLLBAR`/`bDragActive`
   (13-15), and `static prev_pt` (65) — the last is the same shared-static bug class fixed in
   Phase 1.
