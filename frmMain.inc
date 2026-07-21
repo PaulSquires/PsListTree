@@ -197,6 +197,40 @@ end sub
 
 
 ' ========================================================================================
+' Header interaction callbacks (demo) -- numeric traces so the gestures are observable
+' ========================================================================================
+sub Header_WidthChangedCallback( byval hHeader as HWND, byval idx as integer, byval nWidth as integer, byval bLive as boolean )
+    ' plain string, not DWSTRING: print interleaves wide chars
+    dim as string s = "header resize col=" & str(idx) & " w=" & str(nWidth) & " live=" & str(bLive)
+    print s
+end sub
+
+sub Header_ClickCallback( byval hHeader as HWND, byval idx as integer )
+    dim as string s = "header click col=" & str(idx)
+    print s
+end sub
+
+function Header_AutoSizeCallback( byval hHeader as HWND, byval idx as integer ) as integer
+    ' Demo best-fit: measure the column CAPTION with the header font + 2*padding. (A
+    ' real host measures its widest cell; the standalone header has no cell data.)
+    dim as integer bestW = 0
+    dim as DWSTRING wszText = CColumnHeader_GetColumnText( hHeader, idx )
+    dim as HDC hDC = GetDC( hHeader )
+    if hDC then
+        dim as HFONT hOldFont = SelectObject( hDC, ghFont(GUIFONTBOLD_10) )
+        dim as SIZE sz
+        if GetTextExtentPoint32W( hDC, wszText.vptr, len(wszText), @sz ) then bestW = sz.cx
+        SelectObject( hDC, hOldFont )
+        ReleaseDC( hHeader, hDC )
+    end if
+    if bestW > 0 then bestW += CColumnHeader_GetPadding( hHeader ) * 2
+    dim as string s = "header autosize col=" & str(idx) & " -> " & str(bestW)
+    print s
+    return bestW
+end function
+
+
+' ========================================================================================
 ' CListBox_MessageCallback
 ' ========================================================================================
 function CListBox_MessageCallback( byval m as CLISTBOX_MESSAGEINFO ptr ) as boolean
@@ -307,6 +341,9 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
     CColumnHeader_SetPaintCallback( HWND_COLHDR, @Header_PaintCallback )
     CColumnHeader_SetBackColor( HWND_COLHDR, theme.BackColorScrollBar )
     CColumnHeader_SetFont( HWND_COLHDR, ghFont(GUIFONTBOLD_10) )
+    CColumnHeader_SetWidthChangedCallback( HWND_COLHDR, @Header_WidthChangedCallback )
+    CColumnHeader_SetClickCallback( HWND_COLHDR, @Header_ClickCallback )
+    CColumnHeader_SetAutoSizeCallback( HWND_COLHDR, @Header_AutoSizeCallback )
     CColumnHeader_AddColumn( HWND_COLHDR, "Name", 160 )
     CColumnHeader_AddColumn( HWND_COLHDR, "Size", 70 )
     CColumnHeader_AddColumn( HWND_COLHDR, "Type" )    ' fill column (default: last)
@@ -385,6 +422,11 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
     print "  Auto-hide  collapse a group in A until the rows fit -> bar disappears"
     print "             and the list reclaims the width; expand -> it returns"
     print "  2 instances nothing you do in one may disturb the other"
+    print "  Header     cursor flips to <-> over a divider (not over the fill column's"
+    print "             edge); drag resizes LIVE (traces w=... live=true, final"
+    print "             live=false); ESC mid-drag snaps back; dbl-click a divider"
+    print "             traces autosize; click a column body traces click (press,"
+    print "             slide off, release -> nothing); tooltip shows column text"
     print
 
     
