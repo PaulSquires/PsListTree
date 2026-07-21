@@ -101,6 +101,20 @@ type MessageCallbackFunc as function( byval m as CLISTBOX_MESSAGEINFO ptr ) as b
 ' Return "" for no tooltip. If unset, the row's own Text is used.
 type TooltipCallbackFunc as function( byval hListControl as HWND, byval row as integer ) as DWSTRING
 
+' The USER changed the selection -- by clicking a row, or by moving the focus with the
+' keyboard (arrows, PageUp/Down, Home/End, Space in checklist mode). row is the MODEL index
+' of the newly focused row, or -1 if there is no focus row.
+'
+' Why this exists: the control handles keyboard navigation itself and WM_KEYDOWN never
+' reaches the message callback, so without this a host cannot tell that an arrow key moved
+' the selection. Mouse-only hosts can keep using WM_LBUTTONUP in the message callback.
+'
+' NOT fired for CListBox_SetCurSel / SetSel / SelectAll / Clear: programmatic setters are
+' silent (the family rule), so a host may call them from inside this callback without
+' re-entering itself. Nor is it fired when the user re-selects the row that is already
+' current -- only an actual change notifies.
+type SelChangeCallbackSub as sub( byval hListControl as HWND, byval row as integer )
+
 type CLISTBOX
     hWin            as HWND
     hToolTip        as HWND
@@ -122,6 +136,10 @@ type CLISTBOX
     nLastHotIdx     as integer = -1       ' last VISIBLE row the mouse was over (hover tracking)
     hotTimerOn      as boolean = false    ' is the hot-tracking safety-net timer running?
     focusRow        as integer = -1       ' MODEL row with the keyboard focus/caret (-1 = none)
+    ' Last row handed to SelChangeCallback -- the host's idea of "current". Programmatic
+    ' setters update it WITHOUT notifying, which is what keeps a later user click on that
+    ' same row correctly silent.
+    lastNotifiedRow as integer = -1
     anchorRow       as integer = -1       ' MODEL row anchoring a shift-range selection
     topRow          as integer = 0        ' MODEL row that should be first displayed; the scroll
                                           ' source of truth the Win32 listbox is re-derived from
@@ -154,6 +172,7 @@ type CLISTBOX
     PaintCallback   as PaintCallbackSub
     MessageCallback as MessageCallbackFunc
     TooltipCallback as TooltipCallbackFunc    ' optional; defaults to the row's Text
+    SelChangeCallback as SelChangeCallbackSub ' optional; user-driven selection changes only
     ' --- Reusable one-row back buffer, so WM_DRAWITEM doesn't create/destroy a
     '     compatible DC + bitmap for every row on every repaint. ---
     cacheDC         as HDC
@@ -325,6 +344,10 @@ sub CLISTBOX.Clear()
     ' report a row of the OLD list against whatever is loaded next
     this.focusRow  = -1
     this.anchorRow = -1
+    ' Clearing is programmatic, so it does NOT notify -- but the host's idea of the
+    ' current row died with the contents too, and leaving it stale would swallow the
+    ' first user selection if it happened to land on the same index.
+    this.lastNotifiedRow = -1
     this.NotifyChange()
 end sub
 
@@ -624,7 +647,11 @@ declare sub      CListBox_SetHeaderFont( byval hListControl as HWND, byval hFont
 '   MessageCallback - observe mouse messages; return TRUE to suppress default handling.
 '                     NOTE: the result is ignored for WM_LBUTTONUP (see CListBox.inc).
 '   TooltipCallback - supply per-row tooltip text on demand; "" for none.
+'   SelChangeCallback - the USER selected a different row (mouse OR keyboard). Silent for
+'                     the programmatic setters. This is the only way to see keyboard
+'                     navigation: the control consumes WM_KEYDOWN itself.
 ' ----------------------------------------------------------------------------------------
 declare sub      CListBox_SetPaintCallback( byval hListControl as HWND, byval usersub as PaintCallbackSub )
 declare sub      CListBox_SetMessageCallback( byval hListControl as HWND, byval userfunc as MessageCallbackFunc )
 declare sub      CListBox_SetTooltipCallback( byval hListControl as HWND, byval userfunc as TooltipCallbackFunc )
+declare sub      CListBox_SetSelChangeCallback( byval hListControl as HWND, byval usersub as SelChangeCallbackSub )

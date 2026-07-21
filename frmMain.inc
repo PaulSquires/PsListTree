@@ -395,6 +395,16 @@ dim shared gSelfTestCellCount as integer = -1     ' -1 = capture never ran
 dim shared gSelfTestRowIsHeader as boolean = false
 dim shared gSelfTestWantRow as integer = -2       ' model row to capture; -2 = any row
 
+' SelChange recorder: the callback fires only for USER-driven selection moves, so the
+' self-test can assert both that it fires (keyboard) and that it does not (setters).
+dim shared gSelChangeCount as integer = 0
+dim shared gSelChangeRow as integer = -99
+
+sub SelfTest_SelChange( byval hCtl as HWND, byval row as integer )
+    gSelChangeCount += 1
+    gSelChangeRow = row
+end sub
+
 sub SelfTest_Check( byval sName as string, byval ok as boolean, byval sDetail as string )
     dim as string s
     if ok then
@@ -548,6 +558,52 @@ sub frmMain_RunSelfTest()
     else
         SelfTest_Check( "paint captured (instance A)", false, "WM_DRAWITEM never ran" )
     end if
+
+    ' ---- 7b. SelChange: fires for user-driven moves ONLY, and never twice for the same
+    '          row. The keyboard case is the reason the callback exists at all -- the
+    '          control consumes WM_KEYDOWN, so nothing else can observe arrow navigation.
+    CListBox_SetSelChangeCallback( hB, @SelfTest_SelChange )
+    dim as HWND hInner = GetDlgItem( hB, IDC_FRMMAIN_LISTBOX )
+
+    gSelChangeCount = 0
+    CListBox_SetCurSel( hB, 2 )
+    SelfTest_Check( "SetCurSel is silent", (gSelChangeCount = 0), _
+        "fires=" & str(gSelChangeCount) )
+
+    gSelChangeCount = 0
+    SendMessage( hInner, WM_KEYDOWN, VK_DOWN, 0 )
+    dim as integer rowAfterDown = CListBox_GetCurSel( hB )
+    SelfTest_Check( "VK_DOWN fires exactly once", (gSelChangeCount = 1), _
+        "fires=" & str(gSelChangeCount) )
+    SelfTest_Check( "SelChange row = GetCurSel", (gSelChangeRow = rowAfterDown), _
+        "cb=" & str(gSelChangeRow) & " GetCurSel=" & str(rowAfterDown) )
+    SelfTest_Check( "VK_DOWN actually moved off row 2", (rowAfterDown <> 2), _
+        "row=" & str(rowAfterDown) )
+
+    gSelChangeCount = 0
+    SendMessage( hInner, WM_KEYDOWN, VK_DOWN, 0 )
+    SelfTest_Check( "second VK_DOWN fires once more", (gSelChangeCount = 1), _
+        "fires=" & str(gSelChangeCount) )
+
+    ' Re-setting the row that is already current must stay silent.
+    gSelChangeCount = 0
+    CListBox_SetCurSel( hB, CListBox_GetCurSel( hB ) )
+    SelfTest_Check( "SetCurSel to the current row is silent", (gSelChangeCount = 0), _
+        "fires=" & str(gSelChangeCount) )
+
+    ' Clamped navigation does not move the focus, so it must not notify either.
+    CListBox_SetCurSel( hB, 0 )
+    gSelChangeCount = 0
+    SendMessage( hInner, WM_KEYDOWN, VK_UP, 0 )
+    SelfTest_Check( "VK_UP clamped at the top is silent", (gSelChangeCount = 0), _
+        "fires=" & str(gSelChangeCount) & " row=" & str(CListBox_GetCurSel(hB)) )
+
+    ' A host that never sets the callback must be unaffected.
+    CListBox_SetSelChangeCallback( hB, 0 )
+    gSelChangeCount = 0
+    SendMessage( hInner, WM_KEYDOWN, VK_DOWN, 0 )
+    SelfTest_Check( "cleared callback stops firing", (gSelChangeCount = 0), _
+        "fires=" & str(gSelChangeCount) )
 
     ' ---- 8. DESTRUCTIVE (last): column delete/insert shift the per-row cells across
     '         the Text<->cells(0) alias, and the fill designation self-heals ----
