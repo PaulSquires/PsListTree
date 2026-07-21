@@ -15,5 +15,6 @@
 
 
 #define IDC_FRMMAIN_LISTBOX      1000
+#define IDC_FRMMAIN_COLHDR       1200
 
 declare function frmMain_Show( byval hWndParent as HWND ) as LRESULT
