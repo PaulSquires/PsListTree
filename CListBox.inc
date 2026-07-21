@@ -251,6 +251,39 @@ end function
 
 
 ' ========================================================================================
+' Per-cell text. Column 0 aliases the row's Text (the pre-columns API); higher columns
+' live in the row's sparse cells() storage -- see the .bi contract. Storage is grown by
+' the ROWINFO member sub because fbc cannot parse `redim rows(i).cells(...)`.
+' ========================================================================================
+function CListBox_SetCellText( byval hListControl as HWND, byval row as integer, byval col as integer, byval Text as DWSTRING ) as boolean
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return false
+    if pList->IsValidRow(row) = false then return false
+    if col < 0 then return false
+    if col = 0 then
+        pList->GetRow(row)->Text = Text
+    else
+        pList->rows(row).EnsureCells( col )
+        pList->rows(row).cells(col - 1) = Text
+    end if
+    return true
+end function
+
+
+function CListBox_GetCellText( byval hListControl as HWND, byval row as integer, byval col as integer ) as DWSTRING
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return ""
+    if pList->IsValidRow(row) = false then return ""
+    if col < 0 then return ""
+    if col = 0 then return CListBox_GetText( hListControl, row )
+    dim as CLISTBOX_ROWINFO ptr pRow = pList->GetRow(row)
+    if col - 1 > ubound(pRow->cells) then return ""   ' sparse: never-set cells read ""
+    dim as DWSTRING wszText = pRow->cells(col - 1)
+    return wszText
+end function
+
+
+' ========================================================================================
 ' Set the user defined row painting callback for the custom listbox control.
 ' ========================================================================================
 sub CListBox_SetPaintCallback( byval hListControl as HWND, byval usersub as PaintCallbackSub )
@@ -619,10 +652,57 @@ end sub
 ' ========================================================================================
 
 ' Keep every row's cell storage aligned when a column is inserted (nDir = +1) or
-' deleted (nDir = -1) at column index idx. Phase 4 (cell storage) supplies the body;
-' until then there is no per-row cell data to shift.
+' deleted (nDir = -1) at column index idx. Handles the column-0 alias boundary: column
+' 0 lives in ROWINFO.Text, columns 1..N in cells(0..N-1). Storage is sparse, so a row
+' storing fewer cells than the mutation point needs no shift (its later columns were
+' already ""). O(rows x cols); the caller wraps it in a single repaint.
 private sub CListBox_ShiftCellColumns( byval pList as CLISTBOX ptr, byval idx as integer, byval nDir as integer )
-    ' placeholder: CLISTBOX_ROWINFO carries no cell array yet
+    if pList = null then exit sub
+    if idx < 0 then exit sub
+    for r as integer = 0 to pList->rowCount - 1
+        dim as integer nCells = ubound(pList->rows(r).cells) + 1   ' stored cells = columns 1..nCells
+        if nDir > 0 then
+            if idx = 0 then
+                ' New first column: old column 0 (Text) becomes column 1. A row storing
+                ' nothing at all needs no gap -- every cell reads "" either way.
+                dim as boolean hasData = (nCells > 0) orelse (len(pList->rows(r).Text) > 0)
+                if hasData then
+                    pList->rows(r).EnsureCells( nCells + 1 )
+                    for c as integer = nCells to 1 step -1
+                        pList->rows(r).cells(c) = pList->rows(r).cells(c - 1)
+                    next
+                    pList->rows(r).cells(0) = pList->rows(r).Text
+                    pList->rows(r).Text = ""
+                end if
+            elseif nCells >= idx then
+                ' Open a gap at cells index idx-1.
+                pList->rows(r).EnsureCells( nCells + 1 )
+                for c as integer = nCells to idx step -1
+                    pList->rows(r).cells(c) = pList->rows(r).cells(c - 1)
+                next
+                pList->rows(r).cells(idx - 1) = ""
+            end if
+        else
+            if idx = 0 then
+                ' Column 0 deleted: column 1 (cells(0)) becomes the new Text.
+                if nCells > 0 then
+                    pList->rows(r).Text = pList->rows(r).cells(0)
+                    for c as integer = 0 to nCells - 2
+                        pList->rows(r).cells(c) = pList->rows(r).cells(c + 1)
+                    next
+                    pList->rows(r).TrimCells( nCells - 1 )
+                else
+                    pList->rows(r).Text = ""
+                end if
+            elseif nCells >= idx then
+                ' Close the gap at cells index idx-1.
+                for c as integer = idx - 1 to nCells - 2
+                    pList->rows(r).cells(c) = pList->rows(r).cells(c + 1)
+                next
+                pList->rows(r).TrimCells( nCells - 1 )
+            end if
+        end if
+    next
 end sub
 
 ' Repaint the child listbox after a column-geometry change (no background erase: the row
@@ -1171,6 +1251,8 @@ function CListBox_OnDrawItem( _
             .isFocused   = (modelRow = pList->focusRow)
             .isHeader    = false
             .isCollapsed = false
+            .columnCount = 0
+            .cells       = 0
             if pRow then
                 .isSelected  = pRow->selected
                 .isHeader    = pRow->IsHeader
@@ -1178,6 +1260,40 @@ function CListBox_OnDrawItem( _
                 .wszCaption  = pRow->Text
             end if
         end with
+
+        ' --- Columns: hand the host per-column cell rects + text. columnCount = 0 (no
+        ' columns defined, or a group-header row -- those span) leaves the contract
+        ' exactly as it always was. Cell x-coordinates come straight from the header's
+        ' derived rects (header and listbox share the container's x origin, see
+        ' CListBox_PositionWindows); y spans this row's buffer. A fill column running
+        ' under the scrollbar clips physically at the buffer blit -- the row buffer is
+        ' the listbox's width. The scratch array persists on the instance so
+        ' WM_DRAWITEM does no per-row heap churn (strictly sequential; the pointer is
+        ' valid only during the callback, documented on the typedef).
+        dim as boolean wantCells = (pRow <> 0)
+        if wantCells then wantCells = (pRow->IsHeader = false)
+        dim as integer nCols = CColumnHeader_GetCount( pList->hHeader )
+        if nCols <= 0 then wantCells = false
+        if wantCells then
+            pList->EnsurePaintCells( nCols )
+            dim as RECT rcCol
+            for c as integer = 0 to nCols - 1
+                CColumnHeader_GetColumnRect( pList->hHeader, c, rcCol )  ' forces layout if dirty
+                with pList->paintCells(c)
+                    .iCol = c
+                    SetRect( @.rc, rcCol.left, 0, rcCol.right, b.rcClientHeight )
+                    if c = 0 then
+                        .wszText = pRow->Text
+                    elseif c - 1 <= ubound(pRow->cells) then
+                        .wszText = pRow->cells(c - 1)
+                    else
+                        .wszText = ""
+                    end if
+                end with
+            next
+            p.columnCount = nCols
+            p.cells = @pList->paintCells(0)
+        end if
 
         if pList->PaintCallback then pList->PaintCallback( @p )
 
