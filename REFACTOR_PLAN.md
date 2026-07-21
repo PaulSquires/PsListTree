@@ -443,8 +443,14 @@ per-cell with DT_END_ELLIPSIS. Gate passed: row cell spans byte-identical to the
 rects trace; sparse cells paint empty. Also fixed the demo's rotted `CollapseRow(6)`
 no-op (Folders header is model row 42).
 
-## Phase 5 — Demo, self-test, docs
+## Phase 5 — Demo, self-test, docs *(done)*
 
 Instance A untouched (backward-compat proof); instance B multi-column with header,
-click-to-sort (host-side), autosize; env-gated `CLISTBOX_SELFTEST=1` geometry assertions
-(CHScrollBar pattern); README column API + contracts.
+click-to-sort (host-side snapshot/sort/repopulate — the control never sorts — with a
+Segoe Fluent arrow glyph painted by the host), caption autosize; env-gated
+`CLISTBOX_SELFTEST=1` assertions (CHScrollBar pattern — captured from the real
+WM_DRAWITEM path via a swapped-in paint callback): 23 checks, all passing — rect math,
+divider gutters (fill divider not grabbable), programmatic-setter silence, cell spans ==
+header rects, width-change reflow, group-header/columnless `columnCount=0`, cell shifts
+across column delete/insert. README documents the column API, id contract (CtrlID/+1/+2),
+callback ownership rule, and the pixel-width vs unscaled-height DPI convention.
