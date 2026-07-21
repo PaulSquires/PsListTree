@@ -612,6 +612,234 @@ end sub
 
 
 ' ========================================================================================
+' Columns / header band. The embedded CColumnHeader child is the single store for column
+' definitions and geometry; these wrappers delegate to it (the scrollbar-wrapper
+' precedent). Column geometry mutations repaint the listbox -- every visible row's cells
+' moved -- unless a BeginUpdate batch is open, whose EndUpdate repaint covers it.
+' ========================================================================================
+
+' Keep every row's cell storage aligned when a column is inserted (nDir = +1) or
+' deleted (nDir = -1) at column index idx. Phase 4 (cell storage) supplies the body;
+' until then there is no per-row cell data to shift.
+private sub CListBox_ShiftCellColumns( byval pList as CLISTBOX ptr, byval idx as integer, byval nDir as integer )
+    ' placeholder: CLISTBOX_ROWINFO carries no cell array yet
+end sub
+
+' Repaint the child listbox after a column-geometry change (no background erase: the row
+' paint callback fills every pixel). No-op inside a BeginUpdate batch.
+private sub CListBox_InvalidateRowsForColumns( byval pList as CLISTBOX ptr )
+    if pList = null then exit sub
+    if pList->updateDepth > 0 then exit sub
+    dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
+    if hList then InvalidateRect( hList, NULL, FALSE )
+end sub
+
+function CListBox_AddColumn( byval hListControl as HWND, byval Text as DWSTRING, byval nWidth as integer = 100, byval nMinWidth as integer = 0, byval itemData as integer = 0 ) as integer
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return -1
+    dim as integer idx = CColumnHeader_AddColumn( pList->hHeader, Text, nWidth, nMinWidth, itemData )
+    if idx <> -1 then CListBox_InvalidateRowsForColumns( pList )
+    return idx
+end function
+
+function CListBox_InsertColumn( byval hListControl as HWND, byval idx as integer, byval Text as DWSTRING, byval nWidth as integer = 100, byval nMinWidth as integer = 0, byval itemData as integer = 0 ) as integer
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return -1
+    dim as integer at = CColumnHeader_InsertColumn( pList->hHeader, idx, Text, nWidth, nMinWidth, itemData )
+    if at <> -1 then
+        ' Keep every row's cell storage aligned with the shifted column indices.
+        CListBox_ShiftCellColumns( pList, at, 1 )
+        CListBox_InvalidateRowsForColumns( pList )
+    end if
+    return at
+end function
+
+function CListBox_DeleteColumn( byval hListControl as HWND, byval idx as integer ) as boolean
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return false
+    if CColumnHeader_DeleteColumn( pList->hHeader, idx ) = false then return false
+    CListBox_ShiftCellColumns( pList, idx, -1 )
+    CListBox_InvalidateRowsForColumns( pList )
+    return true
+end function
+
+sub CListBox_ClearColumns( byval hListControl as HWND )
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return
+    CColumnHeader_Clear( pList->hHeader )
+    ' Cell TEXT is row data, not column geometry: it survives a column-definition
+    ' clear the same way it predates a late column definition (sparse storage).
+    CListBox_InvalidateRowsForColumns( pList )
+end sub
+
+function CListBox_GetColumnCount( byval hListControl as HWND ) as integer
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return 0
+    return CColumnHeader_GetCount( pList->hHeader )
+end function
+
+function CListBox_GetColumnText( byval hListControl as HWND, byval idx as integer ) as DWSTRING
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return ""
+    return CColumnHeader_GetColumnText( pList->hHeader, idx )
+end function
+
+function CListBox_SetColumnText( byval hListControl as HWND, byval idx as integer, byval Text as DWSTRING ) as boolean
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return false
+    ' Header caption only; row cells are untouched, so no listbox repaint needed.
+    return CColumnHeader_SetColumnText( pList->hHeader, idx, Text )
+end function
+
+function CListBox_GetColumnWidth( byval hListControl as HWND, byval idx as integer ) as integer
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return 0
+    return CColumnHeader_GetColumnWidth( pList->hHeader, idx )
+end function
+
+function CListBox_SetColumnWidth( byval hListControl as HWND, byval idx as integer, byval nWidth as integer ) as boolean
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return false
+    if CColumnHeader_SetColumnWidth( pList->hHeader, idx, nWidth ) = false then return false
+    CListBox_InvalidateRowsForColumns( pList )
+    return true
+end function
+
+function CListBox_GetColumnMinWidth( byval hListControl as HWND, byval idx as integer ) as integer
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return 0
+    return CColumnHeader_GetColumnMinWidth( pList->hHeader, idx )
+end function
+
+function CListBox_SetColumnMinWidth( byval hListControl as HWND, byval idx as integer, byval nMinWidth as integer ) as boolean
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return false
+    if CColumnHeader_SetColumnMinWidth( pList->hHeader, idx, nMinWidth ) = false then return false
+    CListBox_InvalidateRowsForColumns( pList )
+    return true
+end function
+
+function CListBox_GetFillColumn( byval hListControl as HWND ) as integer
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return -1
+    return CColumnHeader_GetFillColumn( pList->hHeader )
+end function
+
+function CListBox_SetFillColumn( byval hListControl as HWND, byval idx as integer ) as boolean
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return false
+    if CColumnHeader_SetFillColumn( pList->hHeader, idx ) = false then return false
+    CListBox_InvalidateRowsForColumns( pList )
+    return true
+end function
+
+' Show or hide the header band. Changes the listbox's height (items-per-page), so it
+' re-lays out AND re-syncs the scrollbar -- the same pairing as SetRowHeight.
+function CListBox_ShowHeader( byval hListControl as HWND, byval bShow as boolean = true ) as boolean
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return false
+    if pList->hHeader = 0 then return false
+    if bShow <> pList->headerShown then
+        pList->headerShown = bShow
+        ShowWindow( pList->hHeader, iif( bShow, SW_SHOW, SW_HIDE ) )
+        CListBox_PositionWindows( pList->hWin )
+        CListBox_SyncScrollBar( pList )
+    end if
+    return true
+end function
+
+function CListBox_IsHeaderVisible( byval hListControl as HWND ) as boolean
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return false
+    return pList->headerShown
+end function
+
+function CListBox_GetHeaderHeight( byval hListControl as HWND ) as integer
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return 0
+    return pList->HeaderHeight
+end function
+
+' Height in unscaled units (like RowHeight); DPI-scaled when the control is laid out.
+function CListBox_SetHeaderHeight( byval hListControl as HWND, byval height as integer ) as integer
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return -1
+    if height < 1 then height = 1
+    pList->HeaderHeight = height
+    CListBox_PositionWindows( pList->hWin )
+    CListBox_SyncScrollBar( pList )
+    return height
+end function
+
+' Escape hatch for direct CColumnHeader_* calls (theming, padding, hit-tests). Do NOT
+' set the WidthChanged callback on it -- that slot is this control's chain hook; use
+' CListBox_SetColumnResizeCallback.
+function CListBox_GetHeader( byval hListControl as HWND ) as HWND
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return 0
+    return pList->hHeader
+end function
+
+sub CListBox_SetColumnResizeCallback( byval hListControl as HWND, byval usersub as HDR_WidthChangedCallbackSub )
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return
+    pList->ColumnResizeCallback = usersub
+end sub
+
+sub CListBox_SetColumnClickCallback( byval hListControl as HWND, byval usersub as HDR_ClickCallbackSub )
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return
+    if pList->hHeader then CColumnHeader_SetClickCallback( pList->hHeader, usersub )
+end sub
+
+sub CListBox_SetColumnAutoSizeCallback( byval hListControl as HWND, byval userfunc as HDR_AutoSizeCallbackFunc )
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return
+    if pList->hHeader then CColumnHeader_SetAutoSizeCallback( pList->hHeader, userfunc )
+end sub
+
+sub CListBox_SetHeaderPaintCallback( byval hListControl as HWND, byval usersub as HDR_PaintCallbackSub )
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return
+    if pList->hHeader then CColumnHeader_SetPaintCallback( pList->hHeader, usersub )
+end sub
+
+sub CListBox_SetHeaderTooltipCallback( byval hListControl as HWND, byval userfunc as HDR_TooltipCallbackFunc )
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return
+    if pList->hHeader then CColumnHeader_SetTooltipCallback( pList->hHeader, userfunc )
+end sub
+
+sub CListBox_SetHeaderBackColor( byval hListControl as HWND, byval clr as COLORREF )
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return
+    if pList->hHeader then CColumnHeader_SetBackColor( pList->hHeader, clr )
+end sub
+
+sub CListBox_SetHeaderFont( byval hListControl as HWND, byval hFont as HFONT )
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return
+    if pList->hHeader then CColumnHeader_SetFont( pList->hHeader, hFont )
+end sub
+
+
+' ========================================================================================
+' The embedded header reports a USER column resize: every visible row's cells moved, so
+' repaint the listbox rows, then re-broadcast to the host's ColumnResizeCallback. This
+' chain hook OWNS the header's WidthChanged slot on an embedded header (same rule as the
+' scrollbar's scroll callback) -- hosts subscribe via CListBox_SetColumnResizeCallback.
+' ========================================================================================
+sub CListBox_OnHeaderWidthChanged( byval hHeader as HWND, byval idx as integer, byval nWidth as integer, byval bLive as boolean )
+    ' the header is a child of the CListBox container window
+    dim as CLISTBOX ptr pList = GetListBoxPointer( GetParent(hHeader) )
+    if pList = 0 then return
+    dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
+    if hList then InvalidateRect( hList, NULL, FALSE )
+    if pList->ColumnResizeCallback then pList->ColumnResizeCallback( hHeader, idx, nWidth, bLive )
+end sub
+
+
+' ========================================================================================
 ' Retrieve the background color from the custom listbox control.
 ' ========================================================================================
 function CListBox_GetBackColor( byval hListControl as HWND ) as COLORREF
@@ -663,24 +891,42 @@ function CListBox_PositionWindows( byval hwnd as HWND ) as LRESULT
     ' Get the entire client area
     dim as Rect rc
     GetClientRect( hwnd, @rc )
+    dim pWindow as CWindow ptr = AfxCWindowPtr( hwnd )
 
     ' Reserve a strip on the right edge for the scrollbar, but only while it is shown
     ' (auto-hide gives the width back to the listbox).
     dim as integer sbW = 0
     if (pList->hScrollBar <> 0) andalso pList->scrollBarShown then
         sbW = pList->ScrollBarWidth
-        dim pWindow as CWindow ptr = AfxCWindowPtr( hwnd )
         if pWindow then sbW = pWindow->ScaleX( pList->ScrollBarWidth )
+    end if
+
+    ' Reserve a strip along the top for the column header band while it is shown. The
+    ' header spans the FULL container width -- over the scrollbar strip, listview-style
+    ' -- so column geometry never shifts when the scrollbar auto-hides/shows. It is
+    ' SIZED even while hidden: columns can be defined and painted with the band hidden,
+    ' and the header's LayoutColumns derives its rects from ITS window's client width
+    ' (a 0x0 window would leave them stale). Header (x=0) and listbox (x=0) share the
+    ' container's x origin and neither has a client-shifting border style, so header
+    ' column rects are directly valid as row-cell x coordinates.
+    dim as integer hdrH = 0
+    if pList->hHeader <> 0 then
+        dim as integer hdrWinH = pList->HeaderHeight
+        if pWindow then hdrWinH = pWindow->ScaleY( pList->HeaderHeight )
+        SetWindowPos( pList->hHeader, 0, _
+                        rc.left, rc.top, rc.right - rc.left, hdrWinH, _
+                        SWP_NOZORDER )
+        if pList->headerShown then hdrH = hdrWinH
     end if
 
     dim as HWND hListbox = GetDlgItem( hwnd, pList->idc_ListBox )
     SetWindowPos( hListbox, 0, _
-                    rc.left, rc.top, (rc.right - rc.left) - sbW, rc.bottom - rc.top, _
+                    rc.left, rc.top + hdrH, (rc.right - rc.left) - sbW, (rc.bottom - rc.top) - hdrH, _
                     SWP_NOZORDER )
 
     if (pList->hScrollBar <> 0) andalso (sbW > 0) then
         SetWindowPos( pList->hScrollBar, 0, _
-                        rc.right - sbW, rc.top, sbW, rc.bottom - rc.top, _
+                        rc.right - sbW, rc.top + hdrH, sbW, (rc.bottom - rc.top) - hdrH, _
                         SWP_NOZORDER )
     end if
 
@@ -1589,7 +1835,15 @@ function CListBox_Create( byval hWndParent as HWND, byval CtrlID as integer ) as
     pList->hScrollBar = CVScrollBar_Create( hForm, CtrlID + 1 )
     CVScrollBar_SetScrollCallback( pList->hScrollBar, @CListBox_OnScrollBarScroll )
 
+    ' Optional column header band, owned by this control. Starts hidden
+    ' (CListBox_ShowHeader turns it on); columns can be defined regardless --
+    ' PositionWindows keeps the window sized even while hidden so its column layout
+    ' is always derivable. The WidthChanged slot is this control's chain hook; hosts
+    ' subscribe through CListBox_SetColumnResizeCallback.
+    pList->hHeader = CColumnHeader_Create( hForm, CtrlID + 2 )
+    CColumnHeader_SetWidthChangedCallback( pList->hHeader, @CListBox_OnHeaderWidthChanged )
+
     function = hForm
-    
+
 end function
 
