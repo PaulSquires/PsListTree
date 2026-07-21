@@ -314,6 +314,20 @@ sub CListBox_SetTooltipCallback( byval hListControl as HWND, byval userfunc as T
 end sub
 
 
+' ========================================================================================
+' Set the selection-changed callback. Fired only when the USER moves the selection -- with
+' the mouse or the keyboard -- never by CListBox_SetCurSel/SetSel/SelectAll/Clear.
+'
+' This is the only way to observe keyboard navigation: the control consumes WM_KEYDOWN
+' itself, so arrow/Page/Home/End moves never reach the message callback.
+' ========================================================================================
+sub CListBox_SetSelChangeCallback( byval hListControl as HWND, byval usersub as SelChangeCallbackSub )
+    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+    if pList = null then return
+    pList->SelChangeCallback = usersub
+end sub
+
+
 ' Resolve the tooltip text for a model row: host callback if set, else row Text.
 function CListBox_ResolveTooltipText( byval pList as CLISTBOX ptr, byval modelRow as integer ) as DWSTRING
     if (pList = null) orelse (pList->IsValidRow(modelRow) = false) then return ""
@@ -397,6 +411,10 @@ function CListBox_SetCurSel( byval hListControl as HWND, byval row as integer ) 
         pList->ClearSelection()
         pList->focusRow  = -1
         pList->anchorRow = -1
+        ' Silent (this is the host setting the selection, not the user) -- but track it,
+        ' or the next genuine user selection of this same row would be swallowed as a
+        ' no-change. Same reasoning below.
+        pList->lastNotifiedRow = -1
         CListBox_SyncListboxFromModel( pList )
         if hList then InvalidateRect( hList, NULL, FALSE )
         return -1
@@ -404,6 +422,7 @@ function CListBox_SetCurSel( byval hListControl as HWND, byval row as integer ) 
     pList->SelectOnly( row )
     pList->focusRow  = row
     pList->anchorRow = row
+    pList->lastNotifiedRow = row
     ' Ensure-visible, decided in the MODEL: if the new caret is outside the current
     ' page, move topRow so the caret lands on-page (above -> caret at top; below ->
     ' caret at bottom). The Win32 listbox is then re-derived, never asked to scroll
@@ -1391,6 +1410,25 @@ function CListBox_WndProc( _
 end function
 
 ' ========================================================================================
+' Tell the host the USER moved the selection. The single choke point for the notification:
+' every user-driven path (click, arrow keys, Left-to-header, Space) sets focusRow and then
+' calls this.
+'
+' Keyed on focusRow against lastNotifiedRow, so re-selecting the row that is already
+' current is silent, and so is every programmatic setter -- those update lastNotifiedRow
+' without calling the callback.
+' ========================================================================================
+sub CListBox_NotifySelChange( byval pList as CLISTBOX ptr )
+    if pList = null then return
+    if pList->focusRow = pList->lastNotifiedRow then return
+    pList->lastNotifiedRow = pList->focusRow
+    if pList->SelChangeCallback then
+        pList->SelChangeCallback( pList->hWin, pList->focusRow )
+    end if
+end sub
+
+
+' ========================================================================================
 ' Apply a mouse-click selection to the model, honoring the selection mode and the
 ' Ctrl/Shift modifiers, then repaint. modelRow must be a valid model row.
 ' ========================================================================================
@@ -1423,6 +1461,7 @@ sub CListBox_ApplyClickSelection( byval pList as CLISTBOX ptr, byval modelRow as
     pList->focusRow = modelRow
     dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
     if hList then InvalidateRect( hList, NULL, FALSE )
+    CListBox_NotifySelChange( pList )
 end sub
 
 
@@ -1514,6 +1553,9 @@ sub CListBox_MoveFocusVis( byval pList as CLISTBOX ptr, byval newVis as integer,
     CListBox_EnsureVisible( pList, newModel )
     dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
     if hList then InvalidateRect( hList, NULL, FALSE )
+    ' Keyboard navigation is the ONLY way a host can see this: WM_KEYDOWN is consumed
+    ' here and never reaches the message callback.
+    CListBox_NotifySelChange( pList )
 end sub
 
 ' Left arrow: collapse an expanded header, or (from an item) jump to its header.
@@ -1535,6 +1577,7 @@ sub CListBox_KeyLeft( byval pList as CLISTBOX ptr )
             CListBox_EnsureVisible( pList, h )
             dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
             if hList then InvalidateRect( hList, NULL, FALSE )
+            CListBox_NotifySelChange( pList )
         end if
     end if
 end sub
@@ -1566,6 +1609,7 @@ sub CListBox_KeySpace( byval pList as CLISTBOX ptr, byval isCtrl as boolean )
     pList->anchorRow = f
     dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
     if hList then InvalidateRect( hList, NULL, FALSE )
+    CListBox_NotifySelChange( pList )
 end sub
 
 

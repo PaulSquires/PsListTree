@@ -162,6 +162,7 @@ survives collapse/expand. `GetSelItems` reports every selected row, hidden ones 
 | `SetPaintCallback` | Draw one row via `p->b`. Required. Called per visible row per repaint — keep it cheap. |
 | `SetMessageCallback` | Observe mouse messages; return TRUE to suppress default handling. **Ignored for `WM_LBUTTONUP`** — the listbox releases its mouse capture there, and swallowing it strands the capture. |
 | `SetTooltipCallback` | Return per-row text on demand; `""` for none. Defaults to the row's text. |
+| `SetSelChangeCallback` | The **user** moved the selection — mouse or keyboard. Silent for `SetCurSel`/`SetSel`/`SelectAll`/`Clear`, and silent when the selection does not actually change. **The only way to observe keyboard navigation**: the control consumes `WM_KEYDOWN` itself, so arrow/Page/Home/End moves never reach `SetMessageCallback`. |
 | `SetScrollBarPaintCallback` | Optional; the scrollbar has a working default paint. |
 | `SetHeaderPaintCallback` | Draw one header column cell (`CCOLUMNHEADER_PAINTINFO`: hot/pressed/resize-hot/resizing/fill states). Required to see the header band. |
 | `SetColumnResizeCallback` | User resized a column: per move (`bLive=true`) + final (`bLive=false`). Programmatic setters are silent. |
