@@ -152,6 +152,51 @@ sub CListBox_PaintCallback( byval p as CLISTBOX_PAINTINFO ptr )
 end sub
 
 ' ========================================================================================
+' Header_PaintCallback -- demo painter for the CColumnHeader band (per-column)
+' ========================================================================================
+sub Header_PaintCallback( byval p as CCOLUMNHEADER_PAINTINFO ptr )
+
+    ' State priority for the cell background/foreground: pressed > hot > normal
+    dim as COLORREF backclr, foreclr
+    if p->isPressed then
+        backclr = theme.BackColorSelect
+        foreclr = theme.ForeColorSelect
+    elseif p->isHot then
+        backclr = theme.BackColorHot
+        foreclr = theme.ForeColorHot
+    else
+        backclr = theme.BackColor
+        foreclr = theme.ForeColor
+    end if
+    p->b->SetColors( foreclr, backclr )
+    p->b->PaintRect( @p->rc )
+
+    ' Caption, inset by the control's padding (the space the layout accounts for)
+    dim as RECT rcText = p->rc
+    dim as integer pad = CColumnHeader_GetPadding( p->hHeader )
+    rcText.left += pad
+    rcText.right -= pad
+    p->b->SetFont( ghFont(GUIFONTBOLD_10) )
+    p->b->PaintText( p->wszCaption, @rcText, DT_LEFT )
+
+    ' Divider tick at the right edge, accented (and widened) while its gutter is
+    ' hovered or the divider is being dragged. The fill column has no divider.
+    if p->isFill = false then
+        dim as RECT rcDiv = p->rc
+        rcDiv.left = rcDiv.right - 1
+        dim as COLORREF divclr = theme.ForeColorScrollBar
+        if p->isResizeHot orelse p->isResizing then
+            divclr = theme.FocusAccent
+            rcDiv.left -= 1
+        end if
+        p->b->SetBackColor( divclr )
+        p->b->PaintRect( @rcDiv )
+    end if
+
+end sub
+
+
+' ========================================================================================
 ' CListBox_MessageCallback
 ' ========================================================================================
 function CListBox_MessageCallback( byval m as CLISTBOX_MESSAGEINFO ptr ) as boolean
@@ -252,12 +297,52 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
     CListBox_EndUpdate( HWND_FRMEXPLORER )
     CListBox_SetCurSel( HWND_FRMEXPLORER, 1 )
 
-    ' ---- Instance B (right half): a couple of small groups, one starting
-    ' collapsed. Tests: per-instance hover (must not affect A), empty client-area
-    ' painting below the last row, and collapse hiding a group's items. ----
+    ' ---- Standalone CColumnHeader band (top of the right half), phase 1: proves the
+    ' control works unembedded. Becomes CListBox-embedded in a later phase. ----
+    dim as long hdrH = pWindow->ScaleY( 24 )
+    HWND_COLHDR = CColumnHeader_Create( HWND_FRMMAIN, IDC_FRMMAIN_COLHDR )
+    SetWindowPos( HWND_COLHDR, 0, _
+        halfW, rc.top, rc.right - halfW, hdrH, _
+        SWP_NOZORDER or SWP_SHOWWINDOW )
+    CColumnHeader_SetPaintCallback( HWND_COLHDR, @Header_PaintCallback )
+    CColumnHeader_SetBackColor( HWND_COLHDR, theme.BackColorScrollBar )
+    CColumnHeader_SetFont( HWND_COLHDR, ghFont(GUIFONTBOLD_10) )
+    CColumnHeader_AddColumn( HWND_COLHDR, "Name", 160 )
+    CColumnHeader_AddColumn( HWND_COLHDR, "Size", 70 )
+    CColumnHeader_AddColumn( HWND_COLHDR, "Type" )    ' fill column (default: last)
+
+    ' ---- Phase 1 geometry gate: numeric rect trace, asserted, never eyeballed ----
+    scope
+        dim as RECT rcH, rcC
+        GetClientRect( HWND_COLHDR, @rcC )
+        dim as string sTrace = "Header rects:"
+        dim as integer prevRight = 0
+        dim as boolean okContig = true
+        for i as integer = 0 to CColumnHeader_GetCount( HWND_COLHDR ) - 1
+            CColumnHeader_GetColumnRect( HWND_COLHDR, i, rcH )
+            sTrace &= " c" & str(i) & "=[" & str(rcH.left) & ".." & str(rcH.right) & "]"
+            if i = 0 then
+                if rcH.left <> 0 then okContig = false
+            else
+                if rcH.left <> prevRight then okContig = false
+            end if
+            prevRight = rcH.right
+        next
+        print sTrace
+        dim as boolean okFill = (prevRight = rcC.right)
+        dim as string sVerdict = "Header geometry: "
+        if okContig andalso okFill then sVerdict &= "PASS" else sVerdict &= "FAIL"
+        sVerdict &= "  (contiguous=" & str(okContig) & " lastRight=" & str(prevRight) & _
+                    " clientW=" & str(rcC.right) & ")"
+        print sVerdict
+    end scope
+
+    ' ---- Instance B (right half, below the header band): a couple of small groups,
+    ' one starting collapsed. Tests: per-instance hover (must not affect A), empty
+    ' client-area painting below the last row, and collapse hiding a group's items. ----
     HWND_FRMEXPLORER2 = CListBox_Create( HWND_FRMMAIN, IDC_FRMMAIN_LISTBOX )
     SetWindowPos( HWND_FRMEXPLORER2, 0, _
-        halfW, rc.top, rc.right - halfW, rc.bottom, _
+        halfW, rc.top + hdrH, rc.right - halfW, rc.bottom - hdrH, _
         SWP_NOZORDER or SWP_SHOWWINDOW )
     CListBox_SetPaintCallback( HWND_FRMEXPLORER2, @CListBox_PaintCallback )
     CListBox_SetMessageCallback( HWND_FRMEXPLORER2, @CListBox_MessageCallback )

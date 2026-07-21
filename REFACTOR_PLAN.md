@@ -358,3 +358,81 @@ Phase 2 is the architectural core (model/view) and should land before 3, since s
 keyboard nav both depend on the visible-index mapping. Phase 4/5 are polish once behavior is right.
 Phase 6 (scrollbar) depends on Phase 2's visible-count model and Phase 4's cache/timer patterns,
 so it slots in after those; it is independent of Phase 5.
+
+---
+
+# Multi-column + resizable header refactor (2026-07-20)
+
+Adds listview-report-mode capability: multiple columns with an optional header band
+supporting mouse-driven column resizing. Header and row cells are painted by the host via
+callbacks, consistent with the control family idiom.
+
+## Decisions (agreed up front — do not re-litigate)
+
+- **Header = new separate control `CColumnHeader`** (`HDR_` callback prefix), developed here
+  (CVScrollBar's original path), embedded by CListBox as a top strip; generic and
+  standalone-capable. Child ids: listbox = CtrlID, scrollbar = CtrlID+1, **header = CtrlID+2**.
+- **Row paint stays ONE callback per row**: `CLISTBOX_PAINTINFO` gains `columnCount` + a
+  `cells` pointer (per-column index/rect/text). `columnCount = 0` (no columns, or a group
+  header row) = exactly the old contract → full backward compat.
+- **Cell text stored in the control**; column 0 aliases the existing `Text` field. New
+  `CListBox_SetCellText/GetCellText(row, col, ...)`.
+- **No horizontal scrolling in v1**; all geometry goes through `xOffset` (always 0) so
+  CHScrollBar can be added later. A **fill column** absorbs leftover width (default = last;
+  `CCOLHDR_FILL_NONE` opts out). The fill column's own divider is not draggable.
+- **Column widths are PIXELS** (drag deltas / autosize answers are pixels; unscaled units
+  would accumulate rounding drift). `HeaderHeight` follows `RowHeight`'s unscaled convention.
+  Control-owned defaults (padding, gutter, min width) are DPI-scaled at use.
+- **Header spans the full container width** (over the scrollbar strip, listview-style) so
+  column geometry never shifts when the vertical bar auto-hides/shows.
+- **Live resize** with per-move `WidthChangedCallback(bLive=true)` + final `bLive=false`;
+  ESC cancels (restores pre-drag width); divider dblclick fires an autosize callback the
+  HOST answers (it owns cell data/fonts); column body click fires the sort hook (the
+  control never sorts). Programmatic setters are silent (family rule).
+- **The embedded CColumnHeader instance is the single store for column state**; CListBox
+  keeps none — `CListBox_*` column wrappers delegate (scrollbar-wrapper precedent).
+
+## Phase 0 — fbc probe: nested dynamic DWSTRING arrays *(done)*
+
+Probed fbc 1.10.1: `cells(any) as DWSTRING` inside a TYPE survives `redim preserve` of the
+outer array, element assignment deep-copies, erase+reuse is clean. Caveat found:
+`redim arr(i).cells(...)` does not parse — use a `dim byref` alias or a member sub
+(both probed; recorded in Learnings.md). Representation A (nested arrays) is a go.
+
+## Phase 1 — CColumnHeader control, static *(done)*
+
+`CColumnHeader.bi/.inc`: CStatusBar-shaped (state TYPE in CWindow UserData, lazy
+`bLayoutDirty` layout, whole-band clsDoubleBuffer paint, per-column host paint dispatch,
+on-demand tooltip), CVScrollBar-shaped Create. `LayoutColumns` derives contiguous rects,
+fill column shrinks AND grows (never below min). Divider gutter hit-test (right-to-left,
+gutter beats body). Demo: standalone band above instance B. Gate passed: clean build,
+numeric trace `c0=[0..160] c1=[160..230] c2=[230..392]` contiguous, fill edge = clientW.
+
+## Phase 2 — CColumnHeader interactions
+
+Divider drag-resize with CTabBar capture discipline (capture on down before callbacks;
+save-then-clear before ReleaseCapture; up-callback result ignored; WM_CAPTURECHANGED
+cancels and restores; WM_DESTROY releases), ESC via GetAsyncKeyState poll,
+WM_SETCURSOR → IDC_SIZEWE (must return TRUE), body click, divider dblclick autosize
+(CS_DBLCLKS; dblclk substitutes for the second down — same capture bookkeeping).
+
+## Phase 3 — CListBox embeds CColumnHeader
+
+`hHeader` child, `PositionWindows` reserves a `ScaleY(HeaderHeight)` top strip when shown
+(header sized even when hidden, else LayoutColumns bails at 0x0 and rects go stale),
+internal width-changed chain invalidates the listbox then re-broadcasts to the host's
+`CListBox_SetColumnResizeCallback` (hosts must not take the header's own slot), full
+wrapper set, `ShowHeader`/`SetHeaderHeight` re-layout + scrollbar re-sync.
+
+## Phase 4 — Cell storage + PAINTINFO + OnDrawItem
+
+`CLISTBOX_ROWINFO.cells(any)`, sparse-tolerant Set/GetCellText, `ShiftCellColumns` across
+the Text↔cells(0) alias on column insert/delete, persistent `paintCells()` scratch,
+`columnCount`/`cells` appended to PAINTINFO, OnDrawItem builds buffer-local cell rects
+from header geometry. Host contract: background-fill the full row first, then per-cell.
+
+## Phase 5 — Demo, self-test, docs
+
+Instance A untouched (backward-compat proof); instance B multi-column with header,
+click-to-sort (host-side), autosize; env-gated `CLISTBOX_SELFTEST=1` geometry assertions
+(CHScrollBar pattern); README column API + contracts.

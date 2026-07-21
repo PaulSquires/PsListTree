@@ -34,6 +34,7 @@ dim shared ghFont(MAXFONTS) as HFONT
 dim shared as HWND HWND_FRMMAIN
 dim shared as HWND HWND_FRMEXPLORER
 dim shared as HWND HWND_FRMEXPLORER2
+dim shared as HWND HWND_COLHDR
 
 
 type THEME_TYPE
@@ -55,6 +56,7 @@ dim shared theme as THEME_TYPE
 
 #include once "clsDoubleBuffer.inc"
 #include once "CVScrollBar.inc"
+#include once "CColumnHeader.inc"
 #include once "CListBox.inc"
 #include once "frmMain.inc"
 
