@@ -11,6 +11,15 @@
 #define IDT_CLISTBOX_HOTTRACK   &hCB01
 #define CLISTBOX_HOTTRACK_MS    100
 
+' One cell of a multi-column row, as handed to the paint callback. The rect is in the
+' row buffer's coordinate space (y spans 0..row height; x comes from the header's
+' column geometry, which maps 1:1 onto the row -- see CListBox_PositionWindows).
+type CLISTBOX_CELLINFO
+    iCol            as integer
+    rc              as RECT
+    wszText         as DWSTRING
+end type
+
 type CLISTBOX_PAINTINFO
     itemID          as integer                ' MODEL row index (not the visible/listbox index)
     b               as clsDoubleBuffer ptr    ' points to the caller's buffer (no copy)
@@ -21,6 +30,15 @@ type CLISTBOX_PAINTINFO
     isHeader        as boolean                ' this row is a group header
     isCollapsed     as boolean                ' header only: its child items are hidden
     wszCaption      as DWSTRING
+    ' --- Columns. 0/null whenever the row should paint as a single full-width cell:
+    '     no columns are defined, or this row is a group header (group headers span).
+    '     With columns: background-fill the FULL rc first (selection/hot spans the
+    '     whole row, listview-style), then draw each cells[i].wszText inside
+    '     cells[i].rc -- the control does not clip between cells (DT_END_ELLIPSIS is
+    '     your friend). The array is control-owned scratch, valid ONLY during the
+    '     callback -- copy anything you need to keep. ---
+    columnCount     as integer
+    cells           as CLISTBOX_CELLINFO ptr
 end type
 
 type CLISTBOX_MESSAGEINFO
@@ -38,10 +56,34 @@ type CLISTBOX_ROWINFO
     IsHeader        as boolean = false
     bCollapsed      as boolean = false
     selected        as boolean = false    ' selection is stored in the model, not the listbox
-    Text            as DWSTRING
+    Text            as DWSTRING           ' column 0's cell text (the pre-columns contract)
+    ' Columns 1..N: cells(c-1) holds column c's text. SPARSE storage, independent of
+    ' the column definitions -- grown lazily by SetCellText, and any cell past the
+    ' stored count reads back "" (so populate-then-define and define-then-populate
+    ' both work, and columns added late simply read empty until set).
+    cells(any)      as DWSTRING
     itemData        as integer
     itemDataExtra   as integer
+
+    declare sub EnsureCells( byval n as integer )
+    declare sub TrimCells( byval n as integer )
 end type
+
+' fbc cannot parse `redim rows(i).cells(...)` (a member array reached through an array
+' element); a member procedure redim'ing `this.cells` parses fine -- see Learnings.md.
+sub CLISTBOX_ROWINFO.EnsureCells( byval n as integer )
+    if n <= 0 then exit sub
+    if ubound(this.cells) < n - 1 then redim preserve this.cells( 0 to n - 1 )
+end sub
+
+' Shrink storage to exactly n cells; n <= 0 frees the array.
+sub CLISTBOX_ROWINFO.TrimCells( byval n as integer )
+    if n <= 0 then
+        erase this.cells
+    elseif ubound(this.cells) >= n then
+        redim preserve this.cells( 0 to n - 1 )
+    end if
+end sub
 
 ' Draw one row. Called for each visible row on every repaint; keep it cheap. Paint through
 ' p->b (a per-control buffer that is already clipped and offset to this row), using p->rc
@@ -119,10 +161,16 @@ type CLISTBOX
     cacheOldBmp     as HBITMAP
     cacheW          as integer = 0
     cacheH          as integer = 0
+    ' --- Persistent scratch for PAINTINFO.cells, re-dimensioned only when the column
+    '     count changes (WM_DRAWITEM is strictly sequential and single-threaded, so
+    '     one array serves every row; the pointer handed out is valid only for the
+    '     duration of each callback). ---
+    paintCells(any) as CLISTBOX_CELLINFO
 
     declare destructor()
     declare function EnsureCache( byval refDC as HDC, byval w as integer, byval h as integer ) as HDC
     declare sub      FreeCache()
+    declare sub      EnsurePaintCells( byval n as integer )
     declare function GetCount() as integer                                  ' model row count
     declare function GetVisibleCount() as integer
     declare function AddRow() as CLISTBOX_ROWINFO ptr                       ' append
@@ -188,6 +236,16 @@ sub CLISTBOX.FreeCache()
     this.cacheH = 0
 end sub
 
+' Size the PAINTINFO.cells scratch to exactly n entries (only re-dims when the column
+' count actually changed, so the per-row cost is a compare).
+sub CLISTBOX.EnsurePaintCells( byval n as integer )
+    if n <= 0 then
+        erase this.paintCells
+    elseif ubound(this.paintCells) + 1 <> n then
+        redim this.paintCells( 0 to n - 1 )
+    end if
+end sub
+
 function CLISTBOX.GetCount() as integer
     return this.rowCount
 end function
@@ -233,6 +291,7 @@ function CLISTBOX.InsertRowAt( byval modelRow as integer ) as CLISTBOX_ROWINFO p
         .itemData      = 0
         .itemDataExtra = 0
     end with
+    this.rows(modelRow).TrimCells( 0 )   ' recycled slot: stale cells must not resurrect
 
     this.rowCount += 1
     this.NotifyChange()
@@ -249,7 +308,8 @@ function CLISTBOX.DeleteRowAt( byval modelRow as integer ) as boolean
     for i as integer = modelRow to this.rowCount - 2
         this.rows(i) = this.rows(i + 1)
     next
-    this.rows(this.rowCount - 1).Text = ""   ' free the vacated last slot's string
+    this.rows(this.rowCount - 1).Text = ""       ' free the vacated last slot's strings
+    this.rows(this.rowCount - 1).TrimCells( 0 )
     this.rowCount -= 1
     this.NotifyChange()
     return true
@@ -258,6 +318,7 @@ end function
 sub CLISTBOX.Clear()
     for i as integer = 0 to this.rowCount - 1
         this.rows(i).Text = ""
+        this.rows(i).TrimCells( 0 )
     next
     this.rowCount = 0
     ' the focus/anchor rows died with the contents; left stale, GetCurSel would
@@ -438,9 +499,16 @@ declare function CListBox_GetVisibleCount( byval hListControl as HWND ) as integ
 
 ' ----------------------------------------------------------------------------------------
 ' Row contents.  Set* return FALSE for an invalid row index.
+'   Cells: column 0 IS the row's Text (GetText/SetText and the cell APIs with col = 0
+'   are interchangeable). Higher columns are stored sparsely per row -- any cell never
+'   set reads back "", and cell text is independent of the column DEFINITIONS, so rows
+'   can be populated before or after columns are added. col < 0 fails; col beyond the
+'   defined columns is legal storage (it paints once a matching column exists).
 ' ----------------------------------------------------------------------------------------
 declare function CListBox_GetText( byval hListControl as HWND, byval row as integer ) as DWSTRING
 declare function CListBox_SetText( byval hListControl as HWND, byval row as integer, byval Text as DWSTRING ) as boolean
+declare function CListBox_GetCellText( byval hListControl as HWND, byval row as integer, byval col as integer ) as DWSTRING
+declare function CListBox_SetCellText( byval hListControl as HWND, byval row as integer, byval col as integer, byval Text as DWSTRING ) as boolean
 declare function CListBox_GetItemData( byval hListControl as HWND, byval row as integer ) as integer
 declare function CListBox_SetItemData( byval hListControl as HWND, byval row as integer, byval itemData as integer ) as boolean
 declare function CListBox_GetItemDataExtra( byval hListControl as HWND, byval row as integer ) as integer

@@ -431,12 +431,17 @@ SetRowHeight pairing). Demo: instance B's header is now the embedded one. Gates 
 numerically: column rects contiguous with fill edge = header clientW; hdrTop=0,
 hdrW=contW (spans over the scrollbar strip), listTop=hdrH shown / 0 hidden.
 
-## Phase 4 — Cell storage + PAINTINFO + OnDrawItem
+## Phase 4 — Cell storage + PAINTINFO + OnDrawItem *(done)*
 
-`CLISTBOX_ROWINFO.cells(any)`, sparse-tolerant Set/GetCellText, `ShiftCellColumns` across
-the Text↔cells(0) alias on column insert/delete, persistent `paintCells()` scratch,
-`columnCount`/`cells` appended to PAINTINFO, OnDrawItem builds buffer-local cell rects
-from header geometry. Host contract: background-fill the full row first, then per-cell.
+`CLISTBOX_ROWINFO.cells(any)` with `EnsureCells`/`TrimCells` member subs (the
+redim-through-element workaround), sparse-tolerant Set/GetCellText (col 0 aliases Text),
+`ShiftCellColumns` across the Text↔cells(0) alias on column insert/delete, persistent
+`paintCells()` scratch via `CLISTBOX.EnsurePaintCells`, `columnCount`/`cells` appended to
+PAINTINFO (0/null for group headers and column-less lists), OnDrawItem builds buffer-local
+cell rects from header geometry. Host contract: background-fill the full row first, then
+per-cell with DT_END_ELLIPSIS. Gate passed: row cell spans byte-identical to the header
+rects trace; sparse cells paint empty. Also fixed the demo's rotted `CollapseRow(6)`
+no-op (Folders header is model row 42).
 
 ## Phase 5 — Demo, self-test, docs
 

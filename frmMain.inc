@@ -104,6 +104,10 @@ end Function
 
 
 
+' One-shot numeric trace of the first multi-column row's cell rects (phase 4 gate:
+' compare against the "Header rects:" line -- they must be identical spans).
+dim shared gCellTraceDone as boolean = false
+
 ' ========================================================================================
 ' CListBox_PaintCallback
 ' ========================================================================================
@@ -128,13 +132,34 @@ sub CListBox_PaintCallback( byval p as CLISTBOX_PAINTINFO ptr )
     p->b->PaintRect( @p->rc )
 
     if p->isHeader then
-        ' Header row: bold, with a +/- collapse indicator
+        ' Header row: bold, with a +/- collapse indicator. Group headers always span
+        ' the full row width -- the control never hands them a cell array.
         dim as DWSTRING wszPrefix
         if p->isCollapsed then wszPrefix = "+ " else wszPrefix = "- "
         p->b->SetFont( ghFont(GUIFONTBOLD_10) )
         p->b->PaintText( wszPrefix & p->wszCaption, @p->rc, DT_LEFT )
+    elseif p->columnCount > 0 then
+        ' Multi-column row: the background/selection above already spans the full row
+        ' (listview-style); each cell now draws inside its own rect, ellipsized, inset
+        ' by the header's padding so cells line up with their captions.
+        if gCellTraceDone = false then
+            gCellTraceDone = true
+            dim as string s = "Row cells:   "
+            for c as integer = 0 to p->columnCount - 1
+                s &= " c" & str(c) & "=[" & str(p->cells[c].rc.left) & ".." & str(p->cells[c].rc.right) & "]"
+            next
+            print s
+        end if
+        dim as integer pad = CColumnHeader_GetPadding( HWND_COLHDR )
+        p->b->SetFont( ghFont(GUIFONT_10) )
+        for c as integer = 0 to p->columnCount - 1
+            dim as RECT rcCell = p->cells[c].rc
+            rcCell.left += pad
+            rcCell.right -= pad
+            p->b->PaintText( p->cells[c].wszText, @rcCell, DT_LEFT or DT_END_ELLIPSIS )
+        next
     else
-        ' Item row: normal font, indented under its header
+        ' Single-column item row: normal font, indented under its header
         dim as RECT rcText = p->rc
         rcText.left += 16
         p->b->SetFont( ghFont(GUIFONT_10) )
@@ -351,14 +376,22 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
     CListBox_BeginUpdate( HWND_FRMEXPLORER2 )
     CListBox_AddHeader( HWND_FRMEXPLORER2, "Files" )              ' model row 0
     for i as integer = 0 to 40
-        CListBox_AddString( HWND_FRMEXPLORER2, "file" & i & ".bas", i )   ' rows 1..5
+        dim as integer r = CListBox_AddString( HWND_FRMEXPLORER2, "file" & i & ".bas", i )
+        ' Columns 1/2 (Size/Type); column 0 is the AddString text itself.
+        CListBox_SetCellText( HWND_FRMEXPLORER2, r, 1, str( (i + 1) * 137 ) )
+        CListBox_SetCellText( HWND_FRMEXPLORER2, r, 2, "FreeBASIC source" )
     next
-    CListBox_AddHeader( HWND_FRMEXPLORER2, "Folders" )           ' model row 6
+    CListBox_AddHeader( HWND_FRMEXPLORER2, "Folders" )           ' model row 42
     for i as integer = 0 to 4
-        CListBox_AddString( HWND_FRMEXPLORER2, "folder" & i, i )          ' rows 7..11
+        dim as integer r = CListBox_AddString( HWND_FRMEXPLORER2, "folder" & i, i )
+        ' Size stays "" (sparse cells) -- proves never-set cells paint as empty.
+        CListBox_SetCellText( HWND_FRMEXPLORER2, r, 2, "Folder" )
     next
     CListBox_EndUpdate( HWND_FRMEXPLORER2 )
-    CListBox_CollapseRow( HWND_FRMEXPLORER2, 6 )   ' start the "Folders" group collapsed
+    ' Start the "Folders" group collapsed. (Was CollapseRow(6) -- comment rot from when
+    ' the file loop added 5 rows; row 6 is a file item now, so that call was a silent
+    ' no-op and the group never started collapsed.)
+    CListBox_CollapseRow( HWND_FRMEXPLORER2, 42 )
 
     ' ---- Embedded column header on instance B (phase 3). Columns are defined through
     ' the CListBox wrappers; the header child is the store. Host callbacks go through
