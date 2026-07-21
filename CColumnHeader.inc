@@ -495,11 +495,51 @@ private sub CColumnHeader_UpdateHotTracking( byval pHdr as CCOLUMNHEADER ptr, by
 end sub
 
 
+private sub CColumnHeader_FireWidthChanged( byval pHdr as CCOLUMNHEADER ptr, byval idx as integer, byval nWidth as integer, byval bLive as boolean )
+    if pHdr = 0 then exit sub
+    if pHdr->WidthChangedCallback then pHdr->WidthChangedCallback( pHdr->hWin, idx, nWidth, bLive )
+end sub
+
+
+' ========================================================================================
+' Cancel a live divider drag, RESTORING the pre-drag width, and fire one final
+' WidthChanged notification carrying it (so a host that consumed the live updates
+' converges back). Used by the ESC poll and by WM_CAPTURECHANGED -- unlike CTabBar's
+' live reorder, a half-applied width is not a legitimate final state unless the
+' up-handler blessed it. Save-then-clears the drag state BEFORE ReleaseCapture, so the
+' WM_CAPTURECHANGED that fires during the release finds nothing left to cancel.
+' bReleaseCapture = false when the capture is already gone (WM_CAPTURECHANGED path).
+' ========================================================================================
+private sub CColumnHeader_CancelDragRestore( byval pHdr as CCOLUMNHEADER ptr, byval bReleaseCapture as boolean )
+    if pHdr = 0 then exit sub
+    dim as integer dragIdx = pHdr->nDragDividerIdx
+    if dragIdx = -1 then exit sub
+    pHdr->nDragDividerIdx = -1
+    pHdr->bDragCancelled  = true
+    pHdr->cols(dragIdx).nWidth = pHdr->nDragOrigWidth
+    pHdr->Refresh()
+    CColumnHeader_FireWidthChanged( pHdr, dragIdx, pHdr->nDragOrigWidth, false )
+    if bReleaseCapture then
+        if GetCapture() = pHdr->hWin then ReleaseCapture()
+    end if
+end sub
+
+
 ' ========================================================================================
 ' CColumnHeader Window procedure
 '
 ' This control has no child windows, so there is nothing to subclass: every message is
 ' handled here and anything unhandled goes to DefWindowProc.
+'
+' The press machinery TAKES capture on a press (the CTabBar decision): both gestures
+' here consume the guaranteed down->up pairing -- the divider drag obviously, and the
+' body click's "press, slide off, release -> nothing" cancel semantics. It pays the
+' family's full price:
+'   - capture taken BEFORE the host callback can suppress anything;
+'   - released in the up-handler unconditionally, callback result IGNORED there;
+'   - WM_CAPTURECHANGED cancels the press (and restores an uncommitted drag width);
+'   - WM_DESTROY releases if we still hold it.
+' No SetFocus anywhere: a header must not steal focus from the host's editor.
 ' ========================================================================================
 function CColumnHeader_WndProc( _
             byval hwnd   as HWND, _
@@ -537,6 +577,15 @@ function CColumnHeader_WndProc( _
 
     case WM_TIMER
         if (pHdr <> 0) andalso (wParam = IDT_CCOLHDR_HOTTRACK) then
+            if pHdr->nDragDividerIdx <> -1 then
+                ' While a drag holds capture the cursor legitimately roams outside the
+                ' client: never clear the resize visuals mid-gesture. The timer doubles
+                ' as the ESC poll so a motionless cancel still works.
+                if (GetAsyncKeyState(VK_ESCAPE) and &h8000) then
+                    CColumnHeader_CancelDragRestore( pHdr, true )
+                end if
+                return 0
+            end if
             ' The cursor may have left without a WM_MOUSELEAVE. If it is no longer over
             ' our client area, clear the hot column ourselves.
             dim as RECT rcClient : GetClientRect( hwnd, @rcClient )
@@ -548,6 +597,37 @@ function CColumnHeader_WndProc( _
 
     case WM_MOUSEMOVE
         if pHdr = 0 then return 0
+
+        ' Signed coords: under capture (dragging) they legitimately go negative.
+        dim as integer ptX = cast( short, loword(lParam) )
+        dim as integer ptY = cast( short, hiword(lParam) )
+
+        ' ----------------------------------------------------------------------------
+        ' Divider drag in progress: ESC cancels (restoring the pre-drag width),
+        ' otherwise live-resize -- store the clamped width, re-layout, and notify the
+        ' host per move (bLive = true). Hover tracking is SUSPENDED for the whole
+        ' gesture: the resize visuals are driven by nDragDividerIdx, and with capture
+        ' held the cursor legitimately roams outside the client.
+        ' ----------------------------------------------------------------------------
+        if pHdr->nDragDividerIdx <> -1 then
+            if (GetAsyncKeyState(VK_ESCAPE) and &h8000) then
+                CColumnHeader_CancelDragRestore( pHdr, true )
+            else
+                dim as integer dragIdx = pHdr->nDragDividerIdx
+                dim as integer newW = pHdr->nDragOrigWidth + (ptX - pHdr->nDragAnchorX)
+                dim as integer minW = pHdr->EffectiveMinWidth( dragIdx )
+                if newW < minW then newW = minW
+                if newW <> pHdr->cols(dragIdx).nWidth then
+                    pHdr->cols(dragIdx).nWidth = newW
+                    pHdr->Refresh()
+                    CColumnHeader_FireWidthChanged( pHdr, dragIdx, newW, true )
+                end if
+            end if
+            ' Observer only mid-drag: the gesture is not suppressible in flight.
+            m.idx = -1
+            if pHdr->MessageCallback then pHdr->MessageCallback( @m )
+            return 0
+        end if
 
         ' Track that we are over the control to catch WM_MOUSEHOVER / WM_MOUSELEAVE.
         dim tme as TrackMouseEvent
@@ -562,10 +642,6 @@ function CColumnHeader_WndProc( _
             SetTimer( hwnd, IDT_CCOLHDR_HOTTRACK, CCOLHDR_HOTTRACK_MS, NULL )
             pHdr->hotTimerOn = true
         end if
-
-        ' Signed coords: under capture (phase 2 dragging) they legitimately go negative.
-        dim as integer ptX = cast( short, loword(lParam) )
-        dim as integer ptY = cast( short, hiword(lParam) )
 
         CColumnHeader_UpdateHotTracking( pHdr, ptX, ptY )
 
@@ -585,11 +661,139 @@ function CColumnHeader_WndProc( _
     case WM_MOUSELEAVE
         if pHdr then
             ' Fast path for clearing the hot column (the WM_TIMER poll is the fallback).
-            ' m.idx stays -1: the mouse is gone.
-            CColumnHeader_ClearHotTracking( pHdr, hwnd )
+            ' m.idx stays -1: the mouse is gone. Never while dragging -- with capture
+            ' held the cursor roams outside the client mid-gesture, and a clear would
+            ' strip the resize visuals.
+            if pHdr->nDragDividerIdx = -1 then
+                CColumnHeader_ClearHotTracking( pHdr, hwnd )
+            end if
             if pHdr->MessageCallback then
                 if pHdr->MessageCallback( @m ) then return 0
             end if
+        end if
+
+    case WM_SETCURSOR
+        ' Show the resize cursor over a divider gutter (and for the whole drag, even
+        ' when the cursor is momentarily off any gutter). Must return TRUE after
+        ' SetCursor, or DefWindowProc restores the class arrow cursor on every move.
+        if (pHdr <> 0) andalso (loword(lParam) = HTCLIENT) then
+            dim as POINT pt
+            GetCursorPos( @pt )
+            ScreenToClient( hwnd, @pt )
+            dim as boolean wantSizeCursor = (pHdr->nDragDividerIdx <> -1)
+            if wantSizeCursor = false then
+                wantSizeCursor = (pHdr->HitTestDivider( pt.x, pt.y ) <> -1)
+            end if
+            if wantSizeCursor then
+                SetCursor( LoadCursor( NULL, IDC_SIZEWE ) )
+                return TRUE
+            end if
+        end if
+
+    case WM_LBUTTONDOWN, WM_LBUTTONDBLCLK
+        ' WM_LBUTTONDBLCLK REPLACES the second WM_LBUTTONDOWN (CS_DBLCLKS) but is still
+        ' followed by its own WM_LBUTTONUP, so it must run the same press bookkeeping or
+        ' that up would release a capture never taken.
+        SetCapture( hwnd )
+        if pHdr then
+            dim as integer ptX = cast( short, loword(lParam) )
+            dim as integer ptY = cast( short, hiword(lParam) )
+            dim as integer divIdx = pHdr->HitTestDivider( ptX, ptY )
+            pHdr->bDragCancelled = false
+            m.idx = pHdr->HitTestColumn( ptX, ptY )
+            ' Host observer first: TRUE suppresses the press semantics -- but never the
+            ' capture bookkeeping, whose release is already guaranteed above.
+            if pHdr->MessageCallback then
+                if pHdr->MessageCallback( @m ) then return 0
+            end if
+            if (uMsg = WM_LBUTTONDBLCLK) andalso (divIdx <> -1) then
+                ' Divider double-click: ask the host for a best-fit width (it owns the
+                ' cell data and fonts; the control cannot measure). <= 0 = no change.
+                ' Replaces any press/drag semantics for this down; the trailing up
+                ' finds no press state and does nothing.
+                if pHdr->AutoSizeCallback then
+                    dim as integer bestW = pHdr->AutoSizeCallback( hwnd, divIdx )
+                    if bestW > 0 then
+                        dim as integer minW = pHdr->EffectiveMinWidth( divIdx )
+                        if bestW < minW then bestW = minW
+                        pHdr->cols(divIdx).nWidth = bestW
+                        pHdr->Refresh()
+                        CColumnHeader_FireWidthChanged( pHdr, divIdx, bestW, false )
+                    end if
+                end if
+            elseif divIdx <> -1 then
+                ' Arm a divider drag. The base is the EFFECTIVE (min-clamped) width, so
+                ' the first pixel of movement never jumps from a sub-minimum stored
+                ' value. (A body dblclk falls through to the press below -- it simply
+                ' clicks twice, once per matched press/release pair.)
+                dim as integer baseW = pHdr->cols(divIdx).nWidth
+                dim as integer minW = pHdr->EffectiveMinWidth( divIdx )
+                if baseW < minW then baseW = minW
+                pHdr->nDragDividerIdx = divIdx
+                pHdr->nDragOrigWidth  = baseW
+                pHdr->nDragAnchorX    = ptX
+                CColumnHeader_InvalidateColumn( pHdr, divIdx )    ' isResizing visual on
+            elseif m.idx <> -1 then
+                pHdr->nPressedIdx = m.idx
+                CColumnHeader_InvalidateColumn( pHdr, m.idx )     ' isPressed visual on
+            end if
+        end if
+
+    case WM_LBUTTONUP
+        ' Save-then-clear the press/drag BEFORE releasing: WM_CAPTURECHANGED arrives
+        ' during ReleaseCapture and must find nothing to cancel.
+        dim as integer pressedIdx = -1
+        dim as integer dragIdx = -1
+        if pHdr then
+            pressedIdx = pHdr->nPressedIdx
+            dragIdx    = pHdr->nDragDividerIdx
+            pHdr->nPressedIdx     = -1
+            pHdr->nDragDividerIdx = -1
+        end if
+        if GetCapture() = hwnd then ReleaseCapture()
+        if pHdr then
+            dim as integer ptX = cast( short, loword(lParam) )
+            dim as integer ptY = cast( short, hiword(lParam) )
+            m.idx = pHdr->HitTestColumn( ptX, ptY )
+            ' Result IGNORED: this message just released the capture, and a callback
+            ' must never be able to strand that (Learnings.md, the CListBox bug).
+            if pHdr->MessageCallback then pHdr->MessageCallback( @m )
+            CColumnHeader_InvalidateColumn( pHdr, pressedIdx )    ' isPressed off (no-op -1)
+            CColumnHeader_InvalidateColumn( pHdr, dragIdx )       ' isResizing off (no-op -1)
+            if dragIdx <> -1 then
+                ' Drag commit: the width was live-applied per move; one final
+                ' notification blesses it.
+                CColumnHeader_FireWidthChanged( pHdr, dragIdx, pHdr->cols(dragIdx).nWidth, false )
+            elseif (pressedIdx <> -1) andalso (pressedIdx = m.idx) then
+                ' Click fires only on a MATCHED gesture: pressed this column's body and
+                ' released still on it. Capture is what routed an outside-release here
+                ' as idx = -1, making slide-off a reliable cancel.
+                if pHdr->ClickCallback then pHdr->ClickCallback( hwnd, pressedIdx )
+            end if
+        end if
+
+    case WM_RBUTTONDOWN
+        ' Observer only: no press semantics, no capture.
+        if pHdr then
+            dim as integer ptX = cast( short, loword(lParam) )
+            dim as integer ptY = cast( short, hiword(lParam) )
+            m.idx = pHdr->HitTestColumn( ptX, ptY )
+            if pHdr->MessageCallback then
+                if pHdr->MessageCallback( @m ) then return 0
+            end if
+        end if
+
+    case WM_CAPTURECHANGED
+        ' Someone stole the capture mid-gesture (Alt-Tab, a menu, another SetCapture).
+        ' The gesture is dead: cancel the press so no click can fire from its corpse,
+        ' and restore an uncommitted drag's width (no ReleaseCapture -- it is already
+        ' not ours). The interactive paths cleared their state before releasing, so
+        ' this finds nothing to do after a normal up/ESC.
+        if pHdr then
+            dim as integer wasPressed = pHdr->nPressedIdx
+            pHdr->nPressedIdx = -1
+            CColumnHeader_InvalidateColumn( pHdr, wasPressed )    ' no-op for -1
+            CColumnHeader_CancelDragRestore( pHdr, false )
         end if
 
     case WM_NOTIFY

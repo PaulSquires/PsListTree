@@ -408,13 +408,17 @@ fill column shrinks AND grows (never below min). Divider gutter hit-test (right-
 gutter beats body). Demo: standalone band above instance B. Gate passed: clean build,
 numeric trace `c0=[0..160] c1=[160..230] c2=[230..392]` contiguous, fill edge = clientW.
 
-## Phase 2 — CColumnHeader interactions
+## Phase 2 — CColumnHeader interactions *(done — code-complete; drag/ESC/capture feel is the author's interactive pass)*
 
 Divider drag-resize with CTabBar capture discipline (capture on down before callbacks;
 save-then-clear before ReleaseCapture; up-callback result ignored; WM_CAPTURECHANGED
-cancels and restores; WM_DESTROY releases), ESC via GetAsyncKeyState poll,
-WM_SETCURSOR → IDC_SIZEWE (must return TRUE), body click, divider dblclick autosize
-(CS_DBLCLKS; dblclk substitutes for the second down — same capture bookkeeping).
+cancels and restores; WM_DESTROY releases), ESC via GetAsyncKeyState poll (mousemove +
+the hot-track timer, so a motionless cancel works), WM_SETCURSOR → IDC_SIZEWE (must
+return TRUE), body click on matched press+release, divider dblclick autosize
+(CS_DBLCLKS; dblclk substitutes for the second down — same capture bookkeeping; a body
+dblclk just clicks twice). Hover tracking/clears suspended for the whole drag. Drag base
+is the min-clamped width so the first pixel never jumps. Demo traces resize/click/
+autosize numerically.
 
 ## Phase 3 — CListBox embeds CColumnHeader
 
