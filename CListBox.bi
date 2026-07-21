@@ -99,6 +99,16 @@ type CLISTBOX
     hScrollBar      as HWND
     ScrollBarWidth  as integer = CVSCROLL_DEFAULT_WIDTH   ' DPI-scaled when laid out
     scrollBarShown  as boolean = false
+    ' --- Optional column header band (CColumnHeader), created hidden and owned by this
+    '     control. The embedded header instance is the SINGLE store for column
+    '     definitions and geometry -- CListBox keeps no column state; the CListBox_*
+    '     column wrappers delegate, and OnDrawItem reads cell x-coordinates from the
+    '     header's rects. The control owns the header's WidthChanged slot (an internal
+    '     chain hook); hosts use CListBox_SetColumnResizeCallback. ---
+    hHeader         as HWND
+    headerShown     as boolean = false
+    HeaderHeight    as integer = 24       ' unscaled units (like RowHeight); ScaleY at layout
+    ColumnResizeCallback as HDR_WidthChangedCallbackSub   ' host-facing re-broadcast
     PaintCallback   as PaintCallbackSub
     MessageCallback as MessageCallbackFunc
     TooltipCallback as TooltipCallbackFunc    ' optional; defaults to the row's Text
@@ -372,9 +382,10 @@ end sub
 '
 ' THE CONTROL HANDLE
 '   Every CListBox_* function takes the handle returned by CListBox_Create(). That handle
-'   is the container window, which hosts two children: the owner-drawn LISTBOX and the
-'   vertical scrollbar. The functions resolve those children internally. Never pass the
-'   child listbox handle -- results are undefined.
+'   is the container window, which hosts three children: the owner-drawn LISTBOX, the
+'   vertical scrollbar, and the (optional, hidden by default) column header band. The
+'   functions resolve those children internally. Never pass the child listbox handle --
+'   results are undefined.
 '
 '   The handle is a real HWND on purpose (not an opaque type): callers legitimately need
 '   to treat the control as a window, e.g. SetWindowPos() to place and size it. An opaque
@@ -398,8 +409,9 @@ end sub
 '
 ' ----------------------------------------------------------------------------------------
 ' Creation
-'   CtrlID is the child listbox's control id (the scrollbar takes CtrlID + 1). The control
-'   is created zero-sized: position it with SetWindowPos().
+'   CtrlID is the child listbox's control id (the scrollbar takes CtrlID + 1 and the
+'   column header CtrlID + 2). The control is created zero-sized: position it with
+'   SetWindowPos().
 ' ----------------------------------------------------------------------------------------
 declare function CListBox_Create( byval hWndParent as HWND, byval CtrlID as integer ) as HWND
 
@@ -491,6 +503,52 @@ declare function CListBox_GetScrollBar( byval hListControl as HWND ) as HWND
 declare sub      CListBox_SetScrollBarWidth( byval hListControl as HWND, byval nWidth as integer )
 declare sub      CListBox_SetScrollBarColors( byval hListControl as HWND, byval backclr as COLORREF, byval foreclr as COLORREF, byval foreclrhot as COLORREF )
 declare sub      CListBox_SetScrollBarPaintCallback( byval hListControl as HWND, byval usersub as VScrollPaintCallbackSub )
+
+' ----------------------------------------------------------------------------------------
+' Columns and the header band.  All optional: with no columns defined the control paints
+' exactly as before. Column state lives in the embedded CColumnHeader child (the single
+' source of truth); these wrappers delegate to it. Widths are PIXELS (see CColumnHeader.bi
+' for the width/min-width/fill rules); HeaderHeight is unscaled units like RowHeight.
+'
+'   Columns can be defined with the header band hidden (ShowHeader false, the default):
+'   rows still paint in columns, there is just no interactive header strip. The header
+'   spans the full container width -- listview-style, over the scrollbar strip -- so
+'   column geometry never shifts when the scrollbar auto-hides.
+'
+'   CALLBACK OWNERSHIP: on an embedded header the control owns the header's own
+'   WidthChanged slot (it must repaint rows on every live resize). Hosts subscribe with
+'   CListBox_SetColumnResizeCallback -- never CColumnHeader_SetWidthChangedCallback on
+'   the child returned by CListBox_GetHeader. The other header callbacks (paint, click,
+'   autosize, tooltip) pass straight through.
+'
+'   Programmatic setters are silent (family rule): SetColumnWidth repaints but fires no
+'   resize callback; only user drags/autosize notify.
+' ----------------------------------------------------------------------------------------
+declare function CListBox_AddColumn( byval hListControl as HWND, byval Text as DWSTRING, byval nWidth as integer = 100, byval nMinWidth as integer = 0, byval itemData as integer = 0 ) as integer
+declare function CListBox_InsertColumn( byval hListControl as HWND, byval idx as integer, byval Text as DWSTRING, byval nWidth as integer = 100, byval nMinWidth as integer = 0, byval itemData as integer = 0 ) as integer
+declare function CListBox_DeleteColumn( byval hListControl as HWND, byval idx as integer ) as boolean
+declare sub      CListBox_ClearColumns( byval hListControl as HWND )
+declare function CListBox_GetColumnCount( byval hListControl as HWND ) as integer
+declare function CListBox_GetColumnText( byval hListControl as HWND, byval idx as integer ) as DWSTRING
+declare function CListBox_SetColumnText( byval hListControl as HWND, byval idx as integer, byval Text as DWSTRING ) as boolean
+declare function CListBox_GetColumnWidth( byval hListControl as HWND, byval idx as integer ) as integer
+declare function CListBox_SetColumnWidth( byval hListControl as HWND, byval idx as integer, byval nWidth as integer ) as boolean
+declare function CListBox_GetColumnMinWidth( byval hListControl as HWND, byval idx as integer ) as integer
+declare function CListBox_SetColumnMinWidth( byval hListControl as HWND, byval idx as integer, byval nMinWidth as integer ) as boolean
+declare function CListBox_GetFillColumn( byval hListControl as HWND ) as integer
+declare function CListBox_SetFillColumn( byval hListControl as HWND, byval idx as integer ) as boolean
+declare function CListBox_ShowHeader( byval hListControl as HWND, byval bShow as boolean = true ) as boolean
+declare function CListBox_IsHeaderVisible( byval hListControl as HWND ) as boolean
+declare function CListBox_GetHeaderHeight( byval hListControl as HWND ) as integer
+declare function CListBox_SetHeaderHeight( byval hListControl as HWND, byval height as integer ) as integer
+declare function CListBox_GetHeader( byval hListControl as HWND ) as HWND
+declare sub      CListBox_SetColumnResizeCallback( byval hListControl as HWND, byval usersub as HDR_WidthChangedCallbackSub )
+declare sub      CListBox_SetColumnClickCallback( byval hListControl as HWND, byval usersub as HDR_ClickCallbackSub )
+declare sub      CListBox_SetColumnAutoSizeCallback( byval hListControl as HWND, byval userfunc as HDR_AutoSizeCallbackFunc )
+declare sub      CListBox_SetHeaderPaintCallback( byval hListControl as HWND, byval usersub as HDR_PaintCallbackSub )
+declare sub      CListBox_SetHeaderTooltipCallback( byval hListControl as HWND, byval userfunc as HDR_TooltipCallbackFunc )
+declare sub      CListBox_SetHeaderBackColor( byval hListControl as HWND, byval clr as COLORREF )
+declare sub      CListBox_SetHeaderFont( byval hListControl as HWND, byval hFont as HFONT )
 
 ' ----------------------------------------------------------------------------------------
 ' Callbacks.  See the type declarations above for each signature and contract.

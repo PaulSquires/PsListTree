@@ -420,13 +420,16 @@ dblclk just clicks twice). Hover tracking/clears suspended for the whole drag. D
 is the min-clamped width so the first pixel never jumps. Demo traces resize/click/
 autosize numerically.
 
-## Phase 3 — CListBox embeds CColumnHeader
+## Phase 3 — CListBox embeds CColumnHeader *(done)*
 
-`hHeader` child, `PositionWindows` reserves a `ScaleY(HeaderHeight)` top strip when shown
-(header sized even when hidden, else LayoutColumns bails at 0x0 and rects go stale),
-internal width-changed chain invalidates the listbox then re-broadcasts to the host's
-`CListBox_SetColumnResizeCallback` (hosts must not take the header's own slot), full
-wrapper set, `ShowHeader`/`SetHeaderHeight` re-layout + scrollbar re-sync.
+`hHeader` child (CtrlID+2), `PositionWindows` reserves a `ScaleY(HeaderHeight)` top strip
+when shown (header sized even when hidden, else LayoutColumns bails at 0x0 and rects go
+stale), internal width-changed chain invalidates the listbox then re-broadcasts to the
+host's `CListBox_SetColumnResizeCallback` (hosts must not take the header's own slot),
+full wrapper set, `ShowHeader`/`SetHeaderHeight` re-layout + scrollbar re-sync (the
+SetRowHeight pairing). Demo: instance B's header is now the embedded one. Gates passed
+numerically: column rects contiguous with fill edge = header clientW; hdrTop=0,
+hdrW=contW (spans over the scrollbar strip), listTop=hdrH shown / 0 hidden.
 
 ## Phase 4 — Cell storage + PAINTINFO + OnDrawItem
 

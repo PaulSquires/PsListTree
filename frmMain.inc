@@ -331,24 +331,52 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
     CListBox_EndUpdate( HWND_FRMEXPLORER )
     CListBox_SetCurSel( HWND_FRMEXPLORER, 1 )
 
-    ' ---- Standalone CColumnHeader band (top of the right half), phase 1: proves the
-    ' control works unembedded. Becomes CListBox-embedded in a later phase. ----
-    dim as long hdrH = pWindow->ScaleY( 24 )
-    HWND_COLHDR = CColumnHeader_Create( HWND_FRMMAIN, IDC_FRMMAIN_COLHDR )
-    SetWindowPos( HWND_COLHDR, 0, _
-        halfW, rc.top, rc.right - halfW, hdrH, _
+    ' ---- Instance B (right half): a couple of small groups, one starting
+    ' collapsed, PLUS the embedded column header band. Tests: per-instance hover
+    ' (must not affect A), empty client-area painting below the last row, collapse
+    ' hiding a group's items, and the header/columns integration. ----
+    HWND_FRMEXPLORER2 = CListBox_Create( HWND_FRMMAIN, IDC_FRMMAIN_LISTBOX )
+    SetWindowPos( HWND_FRMEXPLORER2, 0, _
+        halfW, rc.top, rc.right - halfW, rc.bottom, _
         SWP_NOZORDER or SWP_SHOWWINDOW )
-    CColumnHeader_SetPaintCallback( HWND_COLHDR, @Header_PaintCallback )
-    CColumnHeader_SetBackColor( HWND_COLHDR, theme.BackColorScrollBar )
-    CColumnHeader_SetFont( HWND_COLHDR, ghFont(GUIFONTBOLD_10) )
-    CColumnHeader_SetWidthChangedCallback( HWND_COLHDR, @Header_WidthChangedCallback )
-    CColumnHeader_SetClickCallback( HWND_COLHDR, @Header_ClickCallback )
-    CColumnHeader_SetAutoSizeCallback( HWND_COLHDR, @Header_AutoSizeCallback )
-    CColumnHeader_AddColumn( HWND_COLHDR, "Name", 160 )
-    CColumnHeader_AddColumn( HWND_COLHDR, "Size", 70 )
-    CColumnHeader_AddColumn( HWND_COLHDR, "Type" )    ' fill column (default: last)
+    CListBox_SetPaintCallback( HWND_FRMEXPLORER2, @CListBox_PaintCallback )
+    CListBox_SetMessageCallback( HWND_FRMEXPLORER2, @CListBox_MessageCallback )
+    CListBox_SetBackColor( HWND_FRMEXPLORER2, theme.BackColor )
+    CListBox_SetFont( HWND_FRMEXPLORER2, ghFont(GUIFONT_10) )
+    CListBox_SetTooltipCallback( HWND_FRMEXPLORER2, @CListBox_TooltipCallback )
+    CListBox_SetScrollBarColors( HWND_FRMEXPLORER2, theme.BackColorScrollBar, _
+                                 theme.ForeColorScrollBar, theme.ForeColorScrollBarHot )
+    ' B uses the OTHER selection mode, so the harness covers both.
+    CListBox_SetMultiSelect( HWND_FRMEXPLORER2, true )     ' checklist style: click toggles
+    CListBox_BeginUpdate( HWND_FRMEXPLORER2 )
+    CListBox_AddHeader( HWND_FRMEXPLORER2, "Files" )              ' model row 0
+    for i as integer = 0 to 40
+        CListBox_AddString( HWND_FRMEXPLORER2, "file" & i & ".bas", i )   ' rows 1..5
+    next
+    CListBox_AddHeader( HWND_FRMEXPLORER2, "Folders" )           ' model row 6
+    for i as integer = 0 to 4
+        CListBox_AddString( HWND_FRMEXPLORER2, "folder" & i, i )          ' rows 7..11
+    next
+    CListBox_EndUpdate( HWND_FRMEXPLORER2 )
+    CListBox_CollapseRow( HWND_FRMEXPLORER2, 6 )   ' start the "Folders" group collapsed
 
-    ' ---- Phase 1 geometry gate: numeric rect trace, asserted, never eyeballed ----
+    ' ---- Embedded column header on instance B (phase 3). Columns are defined through
+    ' the CListBox wrappers; the header child is the store. Host callbacks go through
+    ' the wrappers too -- the resize slot on the child itself belongs to the control. ----
+    CListBox_AddColumn( HWND_FRMEXPLORER2, "Name", 160 )
+    CListBox_AddColumn( HWND_FRMEXPLORER2, "Size", 70 )
+    CListBox_AddColumn( HWND_FRMEXPLORER2, "Type" )    ' fill column (default: last)
+    CListBox_SetHeaderPaintCallback( HWND_FRMEXPLORER2, @Header_PaintCallback )
+    CListBox_SetHeaderBackColor( HWND_FRMEXPLORER2, theme.BackColorScrollBar )
+    CListBox_SetHeaderFont( HWND_FRMEXPLORER2, ghFont(GUIFONTBOLD_10) )
+    CListBox_SetColumnResizeCallback( HWND_FRMEXPLORER2, @Header_WidthChangedCallback )
+    CListBox_SetColumnClickCallback( HWND_FRMEXPLORER2, @Header_ClickCallback )
+    CListBox_SetColumnAutoSizeCallback( HWND_FRMEXPLORER2, @Header_AutoSizeCallback )
+    CListBox_ShowHeader( HWND_FRMEXPLORER2, true )
+    HWND_COLHDR = CListBox_GetHeader( HWND_FRMEXPLORER2 )
+
+    ' ---- Geometry gates (numeric, asserted, never eyeballed) ----
+    ' 1) Column rects: contiguous from 0, fill column's right edge = header client width.
     scope
         dim as RECT rcH, rcC
         GetClientRect( HWND_COLHDR, @rcC )
@@ -373,34 +401,33 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
                     " clientW=" & str(rcC.right) & ")"
         print sVerdict
     end scope
-
-    ' ---- Instance B (right half, below the header band): a couple of small groups,
-    ' one starting collapsed. Tests: per-instance hover (must not affect A), empty
-    ' client-area painting below the last row, and collapse hiding a group's items. ----
-    HWND_FRMEXPLORER2 = CListBox_Create( HWND_FRMMAIN, IDC_FRMMAIN_LISTBOX )
-    SetWindowPos( HWND_FRMEXPLORER2, 0, _
-        halfW, rc.top + hdrH, rc.right - halfW, rc.bottom - hdrH, _
-        SWP_NOZORDER or SWP_SHOWWINDOW )
-    CListBox_SetPaintCallback( HWND_FRMEXPLORER2, @CListBox_PaintCallback )
-    CListBox_SetMessageCallback( HWND_FRMEXPLORER2, @CListBox_MessageCallback )
-    CListBox_SetBackColor( HWND_FRMEXPLORER2, theme.BackColor )
-    CListBox_SetFont( HWND_FRMEXPLORER2, ghFont(GUIFONT_10) )
-    CListBox_SetTooltipCallback( HWND_FRMEXPLORER2, @CListBox_TooltipCallback )
-    CListBox_SetScrollBarColors( HWND_FRMEXPLORER2, theme.BackColorScrollBar, _
-                                 theme.ForeColorScrollBar, theme.ForeColorScrollBarHot )
-    ' B uses the OTHER selection mode, so the harness covers both.
-    CListBox_SetMultiSelect( HWND_FRMEXPLORER2, true )     ' checklist style: click toggles
-    CListBox_BeginUpdate( HWND_FRMEXPLORER2 )
-    CListBox_AddHeader( HWND_FRMEXPLORER2, "Files" )              ' model row 0
-    for i as integer = 0 to 40
-        CListBox_AddString( HWND_FRMEXPLORER2, "file" & i & ".bas", i )   ' rows 1..5
-    next
-    CListBox_AddHeader( HWND_FRMEXPLORER2, "Folders" )           ' model row 6
-    for i as integer = 0 to 4
-        CListBox_AddString( HWND_FRMEXPLORER2, "folder" & i, i )          ' rows 7..11
-    next
-    CListBox_EndUpdate( HWND_FRMEXPLORER2 )
-    CListBox_CollapseRow( HWND_FRMEXPLORER2, 6 )   ' start the "Folders" group collapsed
+    ' 2) Embedding layout: header spans the full container width at the top; the listbox
+    '    starts below it; hiding the header gives the strip back.
+    scope
+        dim as HWND hList2 = GetDlgItem( HWND_FRMEXPLORER2, IDC_FRMMAIN_LISTBOX )
+        dim as RECT rcHdr, rcList, rcCont
+        GetWindowRect( HWND_COLHDR, @rcHdr )
+        GetWindowRect( hList2, @rcList )
+        GetWindowRect( HWND_FRMEXPLORER2, @rcCont )
+        dim as integer hdrTop  = rcHdr.top - rcCont.top
+        dim as integer hdrWide = rcHdr.right - rcHdr.left
+        dim as integer contW   = rcCont.right - rcCont.left
+        dim as integer hdrHgt  = rcHdr.bottom - rcHdr.top
+        dim as integer listTop = rcList.top - rcCont.top
+        dim as string sTrace = "Embed: hdrTop=" & str(hdrTop) & " hdrW=" & str(hdrWide) & _
+                               "/" & str(contW) & " hdrH=" & str(hdrHgt) & " listTop=" & str(listTop)
+        print sTrace
+        dim as boolean okShown = (hdrTop = 0) andalso (hdrWide = contW) andalso (listTop = hdrHgt)
+        CListBox_ShowHeader( HWND_FRMEXPLORER2, false )
+        GetWindowRect( hList2, @rcList )
+        dim as integer listTopHidden = rcList.top - rcCont.top
+        CListBox_ShowHeader( HWND_FRMEXPLORER2, true )
+        dim as boolean okHidden = (listTopHidden = 0)
+        dim as string sVerdict = "Embed layout: "
+        if okShown andalso okHidden then sVerdict &= "PASS" else sVerdict &= "FAIL"
+        sVerdict &= "  (listTop hidden=" & str(listTopHidden) & ")"
+        print sVerdict
+    end scope
 
     print "CListBox / CVScrollBar test harness"
     print "-----------------------------------"
