@@ -567,46 +567,38 @@ function DBufD2D_TargetFor( byval hwnd as HWND ) as ID2D1HwndRenderTarget ptr
     if cy < 1 then cy = 1
 
     ' ------------------------------------------------------------------------------------
-    ' THE TARGET IS QUANTISED, AND IT IS NOT ALLOWED TO SHRINK.
+    ' THE TARGET MUST BE EXACTLY THE CLIENT SIZE. Do not "optimise" this; it was tried.
     '
-    ' ID2D1HwndRenderTarget::Resize reallocates a swap chain. Measured on this machine it
-    ' costs a MEAN OF 8.9 ms, with outliers past 480 ms -- and a window being resized
-    ' continuously, which is what every splitter drag does to its panes, would pay that on
-    ' every mouse move. The CSplitter demo made it obvious: dragging the bar that moves
-    ' sideways resizes the other bar's window each step, and the per-move cost went from
-    ' ~1.0 ms to ~11.9 ms, i.e. a visible stutter. GDI and GDI+ have no equivalent cost --
-    ' they just paint -- so this is a Direct2D-specific cliff a host cannot see coming.
+    ' ID2D1HwndRenderTarget::Resize reallocates a swap chain and costs a MEAN OF 8.9 ms on
+    ' this machine, so a window being resized continuously -- which is what a splitter drag
+    ' does to its panes -- pays that on every mouse move. The obvious fix is to over-
+    ' allocate: round the surface up to a grid and never shrink it, turning a resize per
+    ' move into a resize per N px of travel. It measured beautifully, 19.9 ms -> 2.9 ms.
     '
-    ' Rounding the allocation UP to a 64 px grid and never shrinking turns a resize per
-    ' move into a resize per 64 px of travel. A target LARGER than the client is fine: the
-    ' window shows its top-left corner, every control paints its own background over the
-    ' whole client first, and nothing reads back the slack. What is NOT fine is a target
-    ' SMALLER than the client, so growth is still immediate and exact -- the quantum only
-    ' ever adds.
+    ' IT IS ALSO WRONG. An ID2D1HwndRenderTarget whose pixel size differs from its window
+    ' SCALES its surface into the window; it does not present the top-left corner and clip.
+    ' So every over-allocated window rendered slightly squashed, and the last row and
+    ' column -- the part of the surface nothing had painted -- were presented as black.
+    ' Measured on CTextBox's border, which is drawn on the client's outermost pixels:
     '
-    ' The slack is bounded at 63 px per axis, which for a 32bpp surface is a few hundred KB
-    ' on a large window and nothing at all on a scrollbar. Cheaper than one resize.
+    '     GDI            top D69C56  bottom D69C56  left D69C56  right D69C56
+    '     D2D quantised  top CB9453  bottom 000000  left D59B56  right 000000
     '
-    ' The device self-test asserts this contract directly (covers the client, quantised,
-    ' never shrinks), because it replaced an earlier assertion that the pixel size EQUALLED
-    ' the client rect -- which is exactly the invariant being traded away here.
+    ' Note the top and left values too: not equal to GDI, just close. That colour drift is
+    ' the resampling, and it is the tell that would have identified this as scaling rather
+    ' than clipping without needing a second experiment.
+    '
+    ' The resize cost is therefore INHERENT and has to be paid, or avoided by the host
+    ' resizing less (bracket a drag with the BEGIN/END phases and lay out once at END).
     ' ------------------------------------------------------------------------------------
-    const DBUF_RT_QUANTUM = 64
-    dim as long wantCx = ((cx + DBUF_RT_QUANTUM - 1) \ DBUF_RT_QUANTUM) * DBUF_RT_QUANTUM
-    dim as long wantCy = ((cy + DBUF_RT_QUANTUM - 1) \ DBUF_RT_QUANTUM) * DBUF_RT_QUANTUM
-
     dim as long i = DBufD2D_FindSlot( hwnd )
     if i >= 0 then
         if gD2DTargets(i).pRT then
-            ' Grow only. A window that got smaller keeps the larger surface.
-            dim as boolean bGrow = (gD2DTargets(i).cx < cx) orelse (gD2DTargets(i).cy < cy)
-            if bGrow then
-                if wantCx < gD2DTargets(i).cx then wantCx = gD2DTargets(i).cx
-                if wantCy < gD2DTargets(i).cy then wantCy = gD2DTargets(i).cy
-                dim as D2D1_SIZE_U newSize = D2D1_SizeU( wantCx, wantCy )
+            if (gD2DTargets(i).cx <> cx) orelse (gD2DTargets(i).cy <> cy) then
+                dim as D2D1_SIZE_U newSize = D2D1_SizeU( cx, cy )
                 if gD2DTargets(i).pRT->Resize( newSize ) = S_OK then
-                    gD2DTargets(i).cx = wantCx
-                    gD2DTargets(i).cy = wantCy
+                    gD2DTargets(i).cx = cx
+                    gD2DTargets(i).cy = cy
                 else
                     ' Resize failed -- drop it and fall through to a fresh create.
                     gD2DTargets(i).pRT->Release()
@@ -663,10 +655,8 @@ function DBufD2D_TargetFor( byval hwnd as HWND ) as ID2D1HwndRenderTarget ptr
             sPresentOpt = D2D1_PRESENT_OPTIONS_IMMEDIATELY
         end if
     end if
-    ' Created at the QUANTISED size, not the exact client size -- otherwise the very first
-    ' pixel of growth would trigger the resize this quantisation exists to avoid.
     dim as D2D1_HWND_RENDER_TARGET_PROPERTIES hprops = D2D1_HwndRenderTargetProperties( _
-            hwnd, D2D1_SizeU( wantCx, wantCy ), cast( D2D1_PRESENT_OPTIONS, sPresentOpt ) )
+            hwnd, D2D1_SizeU( cx, cy ), cast( D2D1_PRESENT_OPTIONS, sPresentOpt ) )
 
     dim as ID2D1HwndRenderTarget ptr pRT
     if gD2DFactory->CreateHwndRenderTarget( props, hprops, pRT ) <> S_OK then return 0
@@ -682,10 +672,8 @@ function DBufD2D_TargetFor( byval hwnd as HWND ) as ID2D1HwndRenderTarget ptr
     with gD2DTargets(i)
         .hwnd = hwnd
         .pRT  = pRT
-        ' The ALLOCATED size, which is what the grow test above compares against. Storing
-        ' the client size here instead would make every window resize look like growth.
-        .cx   = wantCx
-        .cy   = wantCy
+        .cx   = cx
+        .cy   = cy
     end with
     return pRT
 end function
@@ -975,16 +963,15 @@ sub clsDoubleBuffer_RunD2DSelfTest()
                  (szf.width = csng(szu.width)) andalso (szf.height = csng(szu.height)), _
                  "dips " & szf.width & "x" & szf.height & "  px " & szu.width & "x" & szu.height )
 
-            ' ... and the pixel size COVERS the client area, quantised up to the 64 px grid.
-            ' This assertion used to demand exact equality with the client rect. That
-            ' invariant was deliberately traded away: an exact fit means a Resize() on every
-            ' pixel of growth, and a Resize() costs ~9 ms here, which a splitter drag pays
-            ' on every mouse move. What must still hold is that the surface is never
-            ' SMALLER than the client -- that would clip real content.
+            ' ... and the pixel size is EXACTLY the client area. Not ">=": an
+            ' ID2D1HwndRenderTarget whose pixel size differs from its window SCALES its
+            ' surface into the window, so an over-allocated target renders squashed and
+            ' presents unpainted slack at the right and bottom edges. That was tried as a
+            ' way to dodge Resize()'s ~9 ms cost, and it reached the screen -- see the long
+            ' note on DBufD2D_TargetFor.
             dim as RECT rcc : GetClientRect( hTest, @rcc )
-            Chk( "pixel size covers the client, quantised up", _
-                 (szu.width >= rcc.right) andalso (szu.height >= rcc.bottom) andalso _
-                 ((szu.width mod 64) = 0) andalso ((szu.height mod 64) = 0), _
+            Chk( "pixel size = client rect (exactly -- a mismatch SCALES)", _
+                 (szu.width = rcc.right) andalso (szu.height = rcc.bottom), _
                  "rt " & szu.width & "x" & szu.height & "  client " & rcc.right & "x" & rcc.bottom )
 
             ' Caching: the SAME pointer, not merely a working one.
@@ -999,25 +986,21 @@ sub clsDoubleBuffer_RunD2DSelfTest()
             dim as D2D1_SIZE_U szu3
             pRT3->GetPixelSize( szu3 )
             GetClientRect( hTest, @rcc )
-            Chk( "auto-resize covered the grown window", _
-                 (szu3.width >= rcc.right) andalso (szu3.height >= rcc.bottom), _
+            Chk( "auto-resize followed the window", _
+                 (szu3.width = rcc.right) andalso (szu3.height = rcc.bottom), _
                  "rt " & szu3.width & "x" & szu3.height & "  client " & rcc.right & "x" & rcc.bottom )
             Chk( "resize reused the target, did not recreate", (pRT3 = pRT1), _
                  "Resize() rather than a new device" )
 
-            ' AND IT DOES NOT SHRINK BACK. This is the half that actually buys the speed:
-            ' a window getting smaller must not reallocate, or a drag that sweeps back and
-            ' forth pays on every move in one direction. Asserted by pointer AND by size,
-            ' because "did not recreate" alone would still pass if it had resized down.
-            dim as D2D1_SIZE_U szBig = szu3
+            ' Shrinking must resize too, for the same reason growing does.
             SetWindowPos( hTest, 0, -2000, -2000, 200, 100, SWP_NOZORDER or SWP_NOACTIVATE )
             dim as ID2D1HwndRenderTarget ptr pRT4 = DBufD2D_TargetFor( hTest )
             dim as D2D1_SIZE_U szu4
             pRT4->GetPixelSize( szu4 )
-            Chk( "shrinking the window does NOT resize the target", _
-                 (pRT4 = pRT1) andalso (szu4.width = szBig.width) andalso _
-                 (szu4.height = szBig.height), _
-                 "rt " & szu4.width & "x" & szu4.height & "  was " & szBig.width & "x" & szBig.height )
+            GetClientRect( hTest, @rcc )
+            Chk( "shrinking the window resizes the target too", _
+                 (szu4.width = rcc.right) andalso (szu4.height = rcc.bottom), _
+                 "rt " & szu4.width & "x" & szu4.height & "  client " & rcc.right & "x" & rcc.bottom )
         end if
 
         ' Release removes the slot.

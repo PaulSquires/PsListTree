@@ -146,9 +146,16 @@ function clsDoubleBuffer.BeginDoubleBuffer( byval hwnd as HWND ) as long
 
         ' Only when the update region is a STRICT subset of the client. A full-client
         ' update needs no clip, and pushing one would cost a state change for nothing.
-        dim as boolean bPartial = bHaveUpd andalso _
-                                  ((rcUpd.left > _rc.left) orelse (rcUpd.top > _rc.top) orelse _
-                                   (rcUpd.right < _rc.right) orelse (rcUpd.bottom < _rc.bottom))
+        '
+        ' Hoisted into its own boolean rather than written as one chained expression: fbc
+        ' warning 38 fires on mixing boolean and non-boolean operands in andalso/orelse,
+        ' and the RECT field comparisons are integer-typed either side.
+        dim as boolean bInset = false
+        if rcUpd.left   > _rc.left   then bInset = true
+        if rcUpd.top    > _rc.top    then bInset = true
+        if rcUpd.right  < _rc.right  then bInset = true
+        if rcUpd.bottom < _rc.bottom then bInset = true
+        dim as boolean bPartial = bHaveUpd andalso bInset
         if bPartial then
             _pRT->PushAxisAlignedClip( _
                 type<D2D1_RECT_F>( csng(rcUpd.left), csng(rcUpd.top), _
