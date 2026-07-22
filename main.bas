@@ -8,6 +8,7 @@
 #include once "windows.bi"
 #include once "AfxNova\CWindow.inc"
 #include once "AfxNova\AfxStr.inc"
+#include once "AfxNova\AfxGdiplus.inc"
 
 using AfxNova
 
