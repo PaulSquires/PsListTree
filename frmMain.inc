@@ -405,9 +405,9 @@ sub SelfTest_SelChange( byval hCtl as HWND, byval row as integer )
     gSelChangeRow = row
 end sub
 
-sub SelfTest_Check( byval sName as string, byval ok as boolean, byval sDetail as string )
+sub SelfTest_Check( byval sName as string, byval bOK as boolean, byval sDetail as string )
     dim as string s
-    if ok then
+    if bOK then
         s = "PASS  "
     else
         s = "FAIL  "
