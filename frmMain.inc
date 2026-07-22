@@ -1,6 +1,11 @@
 #include once "frmMain.bi"
 #include once "clsDoubleBuffer.bi"
 
+' FreeBASIC's winuser.bi does not declare this one.
+#ifndef WM_DPICHANGED
+    #define WM_DPICHANGED &h02E0
+#endif
+
 
 ' ========================================================================================
 ' Process WM_PAINT message for window/dialog: frmMain
@@ -79,15 +84,34 @@ function frmMain_WndProc( _
         HANDLE_MSG (hwnd, WM_DESTROY,       frmMain_OnDestroy)
 
         case WM_NCDESTROY
+            ' Host obligation: release this window's cached D2D render target. No-op on
+            ' the GDI backends, so it is written unconditionally -- see the longer note in
+            ' CListBox.inc's own WM_NCDESTROY. Note that a single CListBox owns FOUR
+            ' painting windows (container, row surface, column header, scrollbar); each
+            ' releases its own, and this line covers only the form.
+            clsDoubleBuffer_ReleaseTarget( hwnd )
             ' delete the allocated memory for window
             dim as CWindow ptr pWindow = AfxCWindowPtr(hwnd)
             if pWindow then delete(pWindow)
             HWND_FRMMAIN = 0
             return 0
 
+        case WM_DPICHANGED
+            ' The window moved to a display with a different DPI, so the DirectWrite text
+            ' mode chosen at startup may no longer be the right one. Re-evaluate and
+            ' repaint everything -- the header band and the scrollbar draw text too, and a
+            ' half-switched window is a confusing thing to look at.
+            '
+            ' Without this the auto-selection is a STARTUP-ONLY decision that silently
+            ' goes stale the first time someone drags the window to their second monitor.
+            #ifdef DBUF_IMPL_D2D
+                DBufD2D_AutoSelectTextMode( hwnd )
+                AfxRedrawWindow( hwnd )
+            #endif
+
         case WM_ERASEBKGND
             return true      ' prevents painting the background
-            
+
         case WM_SYSCOMMAND
             if (wParam and &HFFF0) = SC_CLOSE then
                 SendMessage( hwnd, WM_CLOSE, wParam, lParam )
@@ -387,11 +411,15 @@ end function
 ' ========================================================================================
 ' Geometry/contract self-test (run with CLISTBOX_SELFTEST=1). Asserts the column rect
 ' math, divider hit zones, and the painted cell contract -- captured from the REAL
-' WM_DRAWITEM path, never re-derived (CHScrollBar's self-test pattern).
+' paint path, never re-derived (CHScrollBar's self-test pattern).
 ' ========================================================================================
 dim shared gFailCount as integer = 0
 dim shared gSelfTestCells(any) as CLISTBOX_CELLINFO
 dim shared gSelfTestCellCount as integer = -1     ' -1 = capture never ran
+' The row's OWN rect, captured alongside its cells. Rows are painted in the surface's
+' client coordinates now, so "where is this row" is no longer a constant the test can
+' assume -- it has to be read from the same PAINTINFO the cells came from.
+dim shared gSelfTestRowRc as RECT
 dim shared gSelfTestRowIsHeader as boolean = false
 dim shared gSelfTestWantRow as integer = -2       ' model row to capture; -2 = any row
 
@@ -423,6 +451,7 @@ sub SelfTest_RowCapturePaint( byval p as CLISTBOX_PAINTINFO ptr )
     if (gSelfTestWantRow <> -2) andalso (p->itemID <> gSelfTestWantRow) then exit sub
     gSelfTestCellCount   = p->columnCount
     gSelfTestRowIsHeader = p->isHeader
+    gSelfTestRowRc       = p->rc
     if p->columnCount > 0 then
         redim gSelfTestCells( 0 to p->columnCount - 1 )
         for c as integer = 0 to p->columnCount - 1
@@ -498,7 +527,7 @@ sub frmMain_RunSelfTest()
     SelfTest_Check( "fill column's divider not grabbable", _
         (CColumnHeader_HitTestDivider( hHdr, rc2.right, midY ) = -1), "x=" & str(rc2.right) )
 
-    ' ---- 4. Painted cells: captured from the real WM_DRAWITEM path, equal to the
+    ' ---- 4. Painted cells: captured from the real paint path, equal to the
     '         header's rects, y spanning the row height; sparse cells read empty ----
     CListBox_SetPaintCallback( hB, @SelfTest_RowCapturePaint )
     if SelfTest_GrabRow( hB, 1 ) then
@@ -514,15 +543,28 @@ sub frmMain_RunSelfTest()
             SelfTest_Check( "cell x-spans == header rects", okX, _
                 "c0=[" & str(gSelfTestCells(0).rc.left) & ".." & str(gSelfTestCells(0).rc.right) & _
                 "] c1=[" & str(gSelfTestCells(1).rc.left) & ".." & str(gSelfTestCells(1).rc.right) & "]" )
-            dim as HWND hList = GetDlgItem( hB, IDC_FRMMAIN_LISTBOX )
-            dim as integer rowH = SendMessage( hList, LB_GETITEMHEIGHT, 0, 0 )
-            SelfTest_Check( "cell y-span = row height", _
-                (gSelfTestCells(0).rc.top = 0) andalso (gSelfTestCells(0).rc.bottom = rowH), _
-                "top=" & str(gSelfTestCells(0).rc.top) & " bottom=" & str(gSelfTestCells(0).rc.bottom) & _
-                " rowH=" & str(rowH) )
+            ' CONTRACT CHANGE, and this assertion is the one that caught it. Cell rects
+            ' used to arrive in a row-sized buffer starting at y=0, so this checked
+            ' top = 0 and bottom = LB_GETITEMHEIGHT. Both halves are now wrong: rows are
+            ' painted in the surface's CLIENT coordinates, and there is no listbox left
+            ' to ask for an item height (LB_GETITEMHEIGHT returned 0, which is why the
+            ' failure read "rowH=0").
+            '
+            ' Checked against the ROW'S OWN rect rather than against any absolute origin,
+            ' which is what it should always have said -- a cell spans exactly its row,
+            ' wherever that row happens to be. A host row painter that derives everything
+            ' from p->rc needs no change for this; one that hardcoded 0 for the top does.
+            dim as integer rowH = gSelfTestRowRc.bottom - gSelfTestRowRc.top
+            SelfTest_Check( "cell y-span = the row's own y-span", _
+                (rowH > 0) andalso _
+                (gSelfTestCells(0).rc.top = gSelfTestRowRc.top) andalso _
+                (gSelfTestCells(0).rc.bottom = gSelfTestRowRc.bottom), _
+                "cell=[" & str(gSelfTestCells(0).rc.top) & ".." & str(gSelfTestCells(0).rc.bottom) & _
+                "] row=[" & str(gSelfTestRowRc.top) & ".." & str(gSelfTestRowRc.bottom) & _
+                "] rowH=" & str(rowH) )
         end if
     else
-        SelfTest_Check( "paint captured (item row)", false, "WM_DRAWITEM never ran" )
+        SelfTest_Check( "paint captured (item row)", false, "the row paint callback never ran" )
     end if
     SelfTest_Check( "sparse folder Size cell reads empty", _
         (len(CListBox_GetCellText( hB, 43, 1 )) = 0), _
@@ -536,7 +578,7 @@ sub frmMain_RunSelfTest()
         SelfTest_Check( "SetColumnWidth(0,150) -> cell1.left = 150", okW, _
             "left=" & str(gSelfTestCells(1).rc.left) )
     else
-        SelfTest_Check( "paint captured (width reflow)", false, "WM_DRAWITEM never ran" )
+        SelfTest_Check( "paint captured (width reflow)", false, "the row paint callback never ran" )
     end if
     CListBox_SetColumnWidth( hB, 0, 160 )   ' restore
 
@@ -547,7 +589,7 @@ sub frmMain_RunSelfTest()
         SelfTest_Check( "group header captures columnCount=0", okHdr, _
             "n=" & str(gSelfTestCellCount) )
     else
-        SelfTest_Check( "paint captured (group header)", false, "WM_DRAWITEM never ran" )
+        SelfTest_Check( "paint captured (group header)", false, "the row paint callback never ran" )
     end if
 
     ' ---- 7. Instance A (no columns): the pre-columns contract, proven not assumed ----
@@ -556,7 +598,7 @@ sub frmMain_RunSelfTest()
         SelfTest_Check( "no-columns instance captures columnCount=0", _
             (gSelfTestCellCount = 0), "n=" & str(gSelfTestCellCount) )
     else
-        SelfTest_Check( "paint captured (instance A)", false, "WM_DRAWITEM never ran" )
+        SelfTest_Check( "paint captured (instance A)", false, "the row paint callback never ran" )
     end if
 
     ' ---- 7b. SelChange: fires for user-driven moves ONLY, and never twice for the same
@@ -863,6 +905,14 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
     print
 
     
+    ' Choose the DirectWrite text mode from THIS display's DPI, before anything is drawn.
+    ' A host obligation with no error path: skip it and the mode stays on the library's
+    ' default rather than the one the display calls for, and nothing says so. Re-run on
+    ' WM_DPICHANGED (see frmMain_WndProc) so a monitor move re-decides.
+    #ifdef DBUF_IMPL_D2D
+        DBufD2D_AutoSelectTextMode( HWND_FRMMAIN )
+    #endif
+
     UpdateWindow( pWindow->hWindow )
     ShowWindow( pWindow->hWindow, SW_SHOW )
 
