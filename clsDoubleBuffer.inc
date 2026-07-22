@@ -913,6 +913,35 @@ function clsDoubleBuffer.PaintText( _
     pFmt->SetParagraphAlignment( DWRITE_PARAGRAPH_ALIGNMENT_CENTER )   ' = DT_VCENTER
     pFmt->SetWordWrapping( DWRITE_WORD_WRAPPING_NO_WRAP )              ' = DT_SINGLELINE
 
+    ' ------------------------------------------------------------------------------------
+    ' SINGLE LINE MEANS SINGLE LINE, and NO_WRAP is not enough to get it.
+    '
+    ' NO_WRAP disables AUTOMATIC wrapping. It does not stop DirectWrite treating a CR or LF
+    ' in the text as a hard paragraph break, so a string with embedded newlines still comes
+    ' out as several lines -- vertically centred as a block, and clipped top and bottom
+    ' when the block is taller than its rect. GDI's DT_SINGLELINE swallows those same
+    ' breaks and lays the text out on one line.
+    '
+    ' Measured, same string and rect on each backend:
+    '     GDI / GDI+   ink height 22 px, 1 band
+    '     D2D          ink height 60 px, 3 bands, clipped at both ends
+    '
+    ' That divergence is silent and it reached the screen: the CSplitter demo's pane labels
+    ' looked correct for years under GDI (wrongly, as one over-long line) and appeared
+    ' visibly chopped the moment the same code ran on D2D.
+    '
+    ' Since the contract is single-line, D2D is made to match GDI rather than the other way
+    ' round -- a host wanting several lines calls PaintText once per line, which is what the
+    ' whole control family already does. The scan only allocates when a break is actually
+    ' present, which for every caller in the family is never.
+    ' ------------------------------------------------------------------------------------
+    dim as DWSTRING wszDraw = wszText
+    if (instr( wszDraw, chr(13) ) > 0) orelse (instr( wszDraw, chr(10) ) > 0) then
+        wszDraw = AfxStrReplace( wszDraw, chr(13,10), " " )
+        wszDraw = AfxStrReplace( wszDraw, chr(13), " " )
+        wszDraw = AfxStrReplace( wszDraw, chr(10), " " )
+    end if
+
     ' DT_END_ELLIPSIS. Stated on EVERY call, in both directions -- text formats are cached
     ' and shared, so leaving trimming set would make later captions in the same font
     ' silently sprout "..." (see DBufD2D_SetEllipsis).
@@ -930,7 +959,7 @@ function clsDoubleBuffer.PaintText( _
     ' a glyph that still overhangs by a fraction from bleeding into the neighbour.
     ' Measuring mode must match the rendering mode set on the target -- see the note in
     ' dbufD2D.bi. GDI-hinted glyphs at DirectWrite positions look worse than either.
-    _pRT->DrawText( wszText, culng( len(wszText) ), pFmt, layout, _
+    _pRT->DrawText( wszDraw, culng( len(wszDraw) ), pFmt, layout, _
                     cast( ID2D1Brush ptr, pB ), _
                     D2D1_DRAW_TEXT_OPTIONS_CLIP, DBufD2D_MeasuringMode() )
     function = 0

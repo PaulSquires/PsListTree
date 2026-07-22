@@ -311,6 +311,16 @@ type clsDoubleBuffer
                 byval nRight as long, _
                 byval nBottom as long _
                 ) as long
+    ' SINGLE LINE, ALWAYS, and vertically centred in rc. DT_VCENTER and DT_SINGLELINE are
+    ' forced on by this method's contract rather than read from wsStyle, and DT_WORDBREAK
+    ' is IGNORED. Embedded CR/LF are collapsed to spaces on every backend -- for several
+    ' lines, call this once per line.
+    '
+    ' That last part is not free politeness: GDI's DT_SINGLELINE swallows newlines while
+    ' DirectWrite's NO_WRAP does not (it only disables AUTOMATIC wrapping; a CR is still a
+    ' hard paragraph break), so the same string rendered one line under GDI and three
+    ' clipped ones under D2D until the collapse was added. wsStyle usefully carries only
+    ' DT_LEFT / DT_CENTER / DT_RIGHT and DT_END_ELLIPSIS.
     declare function PaintText( _
                 byval wszText as DWSTRING, _
                 byval rc as RECT ptr, _
