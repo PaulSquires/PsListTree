@@ -1751,6 +1751,40 @@ sub clsDoubleBuffer_RunSelfTest( byval hwnd as HWND )
             ' D2D run put different numbers here, and the difference is the finding.
             print "      [measure] 'The quick brown fox' @ Segoe UI 12px = " & _
                   szL.cx & " x " & szL.cy & "   (backend: " & DBUF_BACKEND_NAME & ")"
+
+            ' --- AGREEMENT WITH THE CALL THIS REPLACED ----------------------------------
+            ' The control family converted every width measurement from a direct
+            ' GetTextExtentPoint32W to this function. On the GDI backends that has to be a
+            ' NO-OP -- same font, same string, same number -- or the conversion silently
+            ' moved geometry on builds that had no reason to change. Asserting it once
+            ' here covers every converted site in every control at the same time.
+            '
+            ' On D2D it must NOT be equal (DirectWrite is a different rasterizer), so the
+            ' assertion inverts rather than being skipped: a D2D build reporting exact
+            ' agreement would mean MeasureText had quietly fallen back to GDI, which is
+            ' the failure this half exists to catch. The tolerance is generous because the
+            ' point is "same ballpark, different engine", not a specific delta.
+            dim as SIZE szGdi
+            scope
+                dim as HDC hdcRef = GetDC( NULL )
+                if hdcRef then
+                    dim as HFONT hOldRef = SelectObject( hdcRef, hf )
+                    GetTextExtentPoint32W( hdcRef, wstr("The quick brown fox"), 19, @szGdi )
+                    SelectObject( hdcRef, hOldRef )
+                    ReleaseDC( NULL, hdcRef )
+                end if
+            end scope
+            dim as string sCmp = "MeasureText=" & szL.cx & "x" & szL.cy & _
+                                 "  GetTextExtentPoint32W=" & szGdi.cx & "x" & szGdi.cy
+            #ifdef DBUF_IMPL_D2D
+                dim as long dw = abs( szL.cx - szGdi.cx )
+                Chk( "MeasureText: DirectWrite, close to GDI but not identical", _
+                     (szGdi.cx > 0) andalso (dw <= (szGdi.cx \ 10)), sCmp & "  (delta " & dw & " px)" )
+            #else
+                Chk( "MeasureText: identical to the call it replaced", _
+                     (szL.cx = szGdi.cx) andalso (szL.cy = szGdi.cy), sCmp )
+            #endif
+
             DeleteObject( hf )
         end if
     end scope

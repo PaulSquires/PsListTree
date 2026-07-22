@@ -391,16 +391,13 @@ end sub
 function Header_AutoSizeCallback( byval hHeader as HWND, byval idx as integer ) as integer
     ' Demo best-fit: measure the column CAPTION with the header font + 2*padding. (A
     ' real host measures its widest cell; the standalone header has no cell data.)
+    ' Measured through clsDoubleBuffer_MeasureText, i.e. by whichever engine will actually
+    ' draw the caption. A HOST has the same obligation a control does here: an autosize
+    ' computed with GDI's extents while DirectWrite renders the text produces a column
+    ' that is a pixel or two short, and "best fit" that clips is worse than no autosize.
     dim as integer bestW = 0
     dim as DWSTRING wszText = CColumnHeader_GetColumnText( hHeader, idx )
-    dim as HDC hDC = GetDC( hHeader )
-    if hDC then
-        dim as HFONT hOldFont = SelectObject( hDC, ghFont(GUIFONTBOLD_10) )
-        dim as SIZE sz
-        if GetTextExtentPoint32W( hDC, wszText.vptr, len(wszText), @sz ) then bestW = sz.cx
-        SelectObject( hDC, hOldFont )
-        ReleaseDC( hHeader, hDC )
-    end if
+    bestW = clsDoubleBuffer_MeasureText( wszText, ghFont(GUIFONTBOLD_10) ).cx
     if bestW > 0 then bestW += CColumnHeader_GetPadding( hHeader ) * 2
     dim as string s = "header autosize col=" & str(idx) & " -> " & str(bestW)
     print s
