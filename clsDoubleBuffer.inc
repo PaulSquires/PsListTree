@@ -95,9 +95,38 @@ end function
 ' Under D2D THERE IS NO BACK BUFFER HERE and no blit: the render target presents itself.
 ' BeginPaint is still called, and not for its HDC -- it is what clears the update region.
 ' Skipping it would leave the region dirty and Windows would send WM_PAINT forever.
+'
+' THE UPDATE-REGION CLIP, and why it is not optional.
+'
+' Under GDI and GDI+ the HDC that BeginPaint returns is CLIPPED to the update region. That
+' silently makes a very common idiom correct: a control fills its WHOLE client with the
+' background and then redraws only the items intersecting the update rect, because the
+' fill lands only inside the update region and everything outside keeps the pixels already
+' on screen. Five controls in this family are written that way (CColumnHeader, CStatusBar,
+' CTabBar, CIconPanel, CSelectBar).
+'
+' A Direct2D render target is the window's own surface and NOTHING clips it. The same code
+' therefore wipes the entire client and redraws one item -- every other item vanishes.
+' That is not theoretical: hovering off a CColumnHeader left two of its three captions
+' blank, which is how this was found.
+'
+' Pushing the update rect as a clip reproduces GDI's semantics exactly, for every control,
+' with no control changes at all. It works because a D2D HWND render target PRESERVES the
+' previous frame -- measured, not assumed, since the documentation does not promise it:
+' a frame that fills nothing and redraws one item leaves the rest of the window intact on
+' this machine. If that ever stops being true the symptom would be exactly the bug above,
+' which is at least a loud failure rather than a quiet one.
+'
+' ALIASED, not per-primitive: a clip on pixel boundaries must not feather its edges, or
+' every partial repaint leaves a faint seam where it met the previous frame.
 ' ========================================================================================
 function clsDoubleBuffer.BeginDoubleBuffer( byval hwnd as HWND ) as long
     _UsePaint = true
+#ifdef DBUF_IMPL_D2D
+    ' BEFORE BeginPaint, which is what clears the update region.
+    dim as RECT rcUpd
+    dim as boolean bHaveUpd = (GetUpdateRect( hwnd, @rcUpd, FALSE ) <> 0)
+#endif
     _hwnd = hwnd
     _hDC = BeginPaint( _hwnd, @_ps )
     GetClientRect( _hwnd, @_rc )
@@ -114,6 +143,19 @@ function clsDoubleBuffer.BeginDoubleBuffer( byval hwnd as HWND ) as long
         _pRT->SetTextRenderingParams( DBufD2D_RenderParamsFor( DBufD2D_GetTextMode() ) )
         _pRT->BeginDraw()
         _bDrawing = true
+
+        ' Only when the update region is a STRICT subset of the client. A full-client
+        ' update needs no clip, and pushing one would cost a state change for nothing.
+        dim as boolean bPartial = bHaveUpd andalso _
+                                  ((rcUpd.left > _rc.left) orelse (rcUpd.top > _rc.top) orelse _
+                                   (rcUpd.right < _rc.right) orelse (rcUpd.bottom < _rc.bottom))
+        if bPartial then
+            _pRT->PushAxisAlignedClip( _
+                type<D2D1_RECT_F>( csng(rcUpd.left), csng(rcUpd.top), _
+                                   csng(rcUpd.right), csng(rcUpd.bottom) ), _
+                D2D1_ANTIALIAS_MODE_ALIASED )
+            _bClipPushed = true
+        end if
     end if
 #else
     this.SetupBitmap
@@ -190,6 +232,10 @@ function clsDoubleBuffer.EndDoubleBuffer() as long
     ' fbc warning 38 fires on mixing a pointer with a boolean in andalso/orelse.
     dim as boolean bActive = (_pRT <> 0) andalso _bDrawing
     if bActive then
+        ' Before EndDraw, always. An unbalanced clip makes EndDraw fail outright, so the
+        ' window would freeze on its last good frame -- the same silent failure mode as an
+        ' unhandled device loss.
+        this.PopClipIfPushed()
         dim as HRESULT hr = _pRT->EndDraw()
         _bDrawing = false
         ' Device loss: the GPU behind the target went away (driver reset, remote-desktop
@@ -232,6 +278,7 @@ destructor clsDoubleBuffer()
         ' entirely. End clears the flag, so reaching this means Begin/End was not balanced.
         dim as boolean bStillDrawing = (_pRT <> 0) andalso _bDrawing
         if bStillDrawing then
+            this.PopClipIfPushed()
             _pRT->EndDraw()
             _bDrawing = false
         end if
@@ -278,6 +325,15 @@ end function
 private sub clsDoubleBuffer.ReleaseD2DObjects()
     if _pBrush then _pBrush->Release() : _pBrush = 0
     _brushColorSet = false
+end sub
+
+' Pop the update-region clip if one was pushed, exactly once. Guarded by its own flag
+' rather than by "did we take the partial path", so the two can never disagree.
+private sub clsDoubleBuffer.PopClipIfPushed()
+    if _bClipPushed andalso (_pRT <> 0) then
+        _pRT->PopAxisAlignedClip()
+    end if
+    _bClipPushed = false
 end sub
 #endif
 

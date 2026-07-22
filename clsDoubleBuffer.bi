@@ -210,9 +210,14 @@ type clsDoubleBuffer
         ' True when the target is bound to a DC and EndDoubleBuffer must still BitBlt
         ' (the row/offscreen path); false for the HWND target, which presents itself.
         _bBlitOnEnd      as boolean
+        ' A clip pushed to match the window's UPDATE REGION. Must be popped exactly once,
+        ' before EndDraw. See the long note on the WM_PAINT overload in the .inc -- this is
+        ' what makes a partial InvalidateRect behave the same here as it does under GDI.
+        _bClipPushed     as boolean
 
         declare function BrushFor( byval clr as COLORREF, byval nAlpha as ubyte ) as ID2D1SolidColorBrush ptr
         declare sub      ReleaseD2DObjects()
+        declare sub      PopClipIfPushed()
     #endif
 
     #ifdef DBUF_IMPL_GDIPLUS
