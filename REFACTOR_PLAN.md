@@ -22,15 +22,15 @@ split**, not just bug fixes. Phases are ordered so each is independently testabl
 
 Goal: the control + double buffer compile and run without any tiko-specific globals.
 
-- `clsDoubleBuffer` currently references `ghFont()`, `HWND_FRMMAIN` (clsDoubleBuffer.inc:89),
-  and the `GUIFONT_10` enum (clsDoubleBuffer.bi:32). Remove all three.
-- Change `clsDoubleBuffer.SetFont` to take an `HFONT` directly instead of an index into a global
+- `CBufferPaint` currently references `ghFont()`, `HWND_FRMMAIN` (CBufferPaint.inc:89),
+  and the `GUIFONT_10` enum (CBufferPaint.bi:32). Remove all three.
+- Change `CBufferPaint.SetFont` to take an `HFONT` directly instead of an index into a global
   array. The caller (control or paint callback) owns the fonts.
 - Add font storage to the control: `CListBox_SetFont( hCtl, HFONT )` (and/or let the paint
   callback select a font per row). Control never creates or owns fonts it wasn't given.
-- Add a destructor to `clsDoubleBuffer` (RAII) so an early return between Begin/End can't leak
+- Add a destructor to `CBufferPaint` (RAII) so an early return between Begin/End can't leak
   the memDC/bitmap. Keep `EndDoubleBuffer` for explicit use.
-- Verify `clsDoubleBuffer.bi/.inc` includes only `windows.bi` + AfxNova — no app headers.
+- Verify `CBufferPaint.bi/.inc` includes only `windows.bi` + AfxNova — no app headers.
 
 Test: control compiles in an empty host that defines none of tiko's globals.
 
@@ -179,8 +179,8 @@ instances without cross-talk).
 
 ## Phase 4 — Rendering performance & polish
 
-- **Stop per-row bitmap churn.** `clsDoubleBuffer` allocates+frees a compatible DC and bitmap on
-  every `WM_DRAWITEM` (clsDoubleBuffer.inc:35-41, 62-69) — i.e., per row per repaint. Cache a
+- **Stop per-row bitmap churn.** `CBufferPaint` allocates+frees a compatible DC and bitmap on
+  every `WM_DRAWITEM` (CBufferPaint.inc:35-41, 62-69) — i.e., per row per repaint. Cache a
   per-control memDC/bitmap sized to one row (or the client) and reuse.
 - **Mouse wheel:** respect `SPI_GETWHEELSCROLLLINES` instead of the hardcoded 3 lines
   (CListBox.inc:452), and preserve the delta remainder rather than resetting to 0.
@@ -340,7 +340,7 @@ for CListBox — `TME_LEAVE` will be exactly as unreliable here, so the fix carr
 ### Painting
 
 `CListBox_SetScrollBarPaintCallback( hCtl, @sub )` receiving
-`{ b as clsDoubleBuffer ptr, rcClient, rcThumb, isHot, isDragging }`. Default paint uses settable
+`{ b as CBufferPaint ptr, rcClient, rcThumb, isHot, isDragging }`. Default paint uses settable
 colors so it works immediately; the callback overrides entirely. The demo's `theme` already has
 `BackColorScrollBar` / `ForeColorScrollBar`.
 
@@ -402,7 +402,7 @@ outer array, element assignment deep-copies, erase+reuse is clean. Caveat found:
 ## Phase 1 — CColumnHeader control, static *(done)*
 
 `CColumnHeader.bi/.inc`: CStatusBar-shaped (state TYPE in CWindow UserData, lazy
-`bLayoutDirty` layout, whole-band clsDoubleBuffer paint, per-column host paint dispatch,
+`bLayoutDirty` layout, whole-band CBufferPaint paint, per-column host paint dispatch,
 on-demand tooltip), CVScrollBar-shaped Create. `LayoutColumns` derives contiguous rects,
 fill column shrinks AND grows (never below min). Divider gutter hit-test (right-to-left,
 gutter beats body). Demo: standalone band above instance B. Gate passed: clean build,

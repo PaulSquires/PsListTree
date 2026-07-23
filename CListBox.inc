@@ -1244,7 +1244,7 @@ function CListBox_OnPaint( byval hwnd as HWND ) as LRESULT
     dim as CLISTBOX ptr pList = GetListBoxPointer(hwnd)
     if pList = null then return 0
 
-    dim as clsDoubleBuffer b
+    dim as CBufferPaint b
 
     b.BeginDoubleBuffer(hwnd)
     b.SetBackColor( pList->BackColor )
@@ -1276,7 +1276,7 @@ function CListBox_OnPaintSurface( byval hSurf as HWND ) as LRESULT
     dim as CLISTBOX ptr pList = GetListBoxPointer( GetParent( hSurf ) )
     if pList = null then return 0
 
-    dim as clsDoubleBuffer b
+    dim as CBufferPaint b
     b.BeginDoubleBuffer( hSurf )
 
     ' The control's own background, over the whole client. This also covers the empty

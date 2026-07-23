@@ -23,13 +23,13 @@ Any number of instances can coexist; each owns all of its state.
 | `CListBox.bi` / `.inc` | The control. `CListBox.bi` is the documented public header. |
 | `CColumnHeader.bi` / `.inc` | The column header band CListBox embeds. Generic — works standalone; `CColumnHeader.bi` documents its own API. |
 | `CVScrollBar.bi` / `.inc` | **Vendored build copy** of the scrollbar CListBox embeds. Canonical home: [CVScrollBar](https://github.com/PaulSquires/CVScrollBar) — develop there, sync copies here (the same way tiko vendors its control copies). |
-| `clsDoubleBuffer.bi` / `.inc` | Flicker-free drawing helper used by all three |
+| `CBufferPaint.bi` / `.inc` | Flicker-free drawing helper used by all three |
 | `main.bas`, `frmMain.bi` / `.inc` | Demo / test harness (two instances) + `CLISTBOX_SELFTEST=1` geometry self-test |
 
 Include order matters — `CVScrollBar` and `CColumnHeader` before `CListBox`:
 
 ```freebasic
-#include once "clsDoubleBuffer.inc"
+#include once "CBufferPaint.inc"
 #include once "CVScrollBar.inc"
 #include once "CColumnHeader.inc"
 #include once "CListBox.inc"
@@ -213,9 +213,9 @@ Built and tested with FreeBASIC 1.10.1 (64-bit) against AfxNova. `main.rc` embed
 manifest that makes the demo **DPI-aware**; that is not cosmetic, since geometry measured
 in a DPI-unaware process is a measurement of a stretched bitmap.
 
-The vendored `clsDoubleBuffer` renders **geometry with GDI+ and text with GDI**, selected by
-the `#define DBUF_GDIPLUS` at the top of `clsDoubleBuffer.bi` (defined = GDI+, the default;
-undefine it for plain GDI). The control's own source is identical either way.
+The vendored `CBufferPaint` renders **geometry with GDI+ and text with GDI**. It requires
+one thing of the host: `AfxGdipInit` / `AfxGdipShutdown` must bracket the message loop
+(see `main.bas`). The control's own source never touches GDI+ directly.
 
 ## Design notes
 
