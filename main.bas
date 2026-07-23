@@ -89,17 +89,17 @@ function WinMain( _
     end if
 
 
-    ' Show the main form
-    ' Initialize GDI+ (clsDoubleBuffer's rendering backend -- see DBUF_GDIPLUS). Must be
-    ' running before the first WM_PAINT builds a buffer, and must outlive every one of
-    ' them, so it brackets frmMain_Show.
+    ' Initialize GDI+ (clsDoubleBuffer's rendering backend -- see the DBUF_GDIPLUS switch at
+    ' the top of clsDoubleBuffer.bi). Must be running before the first WM_PAINT builds a
+    ' buffer, and must outlive every one of them, so it brackets frmMain_Show.
     dim as ULONG_PTR gdipToken = AfxGdipInit()
 
+    ' Show the main form
     function = frmMain_Show( 0 )
 
-
-    ' Unload the font file
-    if len(wszFontFile) then RemoveFontResource(wszFontFile)
+    ' Unload the font file. Must mirror the AddFontResourceEx call above, flags included --
+    ' plain RemoveFontResource does not match an FR_PRIVATE registration and leaks it.
+    if len(wszFontFile) then RemoveFontResourceEx( wszFontFile.vptr, FR_PRIVATE, NULL )
 
     ' Uninitialize the COM library
     ' Every window is destroyed and every clsDoubleBuffer has run its destructor by here,

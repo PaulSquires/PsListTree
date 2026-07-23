@@ -12,7 +12,8 @@ Any number of instances can coexist; each owns all of its state.
 - Distinct **selected / hover / focus** visual states, drawn entirely by your callback
 - Full **keyboard navigation** with ensure-visible
 - **On-demand per-row tooltips** (`TTN_GETDISPINFO`), so long text isn't truncated
-- Cached per-row rendering (no GDI churn), correct wheel scrolling
+- **Fully owner-drawn** — no system `LISTBOX` child; the whole visible surface is painted
+  in one pass, which is where most of this control's speed comes from
 - An owner-drawn **vertical scrollbar** that the control creates, positions and auto-hides
 
 ## Files
@@ -126,8 +127,30 @@ CListBox_SetCellText( hList, r, 2, "FreeBASIC source" )
 ## Concepts worth knowing
 
 **The control handle is the container window.** `CListBox_Create` returns the parent that
-hosts the listbox, scrollbar and header children. Pass *that* to every `CListBox_*` call —
-never a child handle. It stays a real `HWND` deliberately, so you can `SetWindowPos` it.
+hosts the row surface, scrollbar and header children. Pass *that* to every `CListBox_*`
+call — never a child handle. It stays a real `HWND` deliberately, so you can
+`SetWindowPos` it.
+
+**There is no system `LISTBOX` any more.** The rows are painted onto a plain owner-drawn
+child — the *surface* — in a single pass per `WM_PAINT`, where the control used to hand
+off to the listbox and receive one `WM_DRAWITEM` per visible row. The listbox had been
+carrying almost nothing by then: 8 distinct `LB_*` messages, of which 15 of ~22 call sites
+were just get/set top index. Selection, focus, keyboard navigation, hot tracking, group
+collapse, cell storage, the scrollbar and the header were already this control's own code.
+
+Collapsing N paint cycles into one is **the** performance result of that change, and it is
+backend-independent: a 2000-row repaint got 25% faster on GDI and 38% faster on GDI+. Gone
+with the listbox: the `WM_DRAWITEM`/`WM_MEASUREITEM`
+path, the one-row back-buffer cache (`EnsureCache`/`FreeCache` and five fields),
+`WM_CTLCOLORLISTBOX` and its brush, and the empty-client-area helper — the surface fills
+its own client whether or not there are rows in it.
+
+**One host-visible contract changed with it.** The row rect (`PAINTINFO.rc`) and each
+`cells[i].rc` are now in the **surface's client coordinates**, not a row-sized buffer
+starting at `y = 0`. A row painter that derives everything from `p->rc` — which it must
+already do, to honour the row's left edge and width — needs no change at all. One that
+hardcodes `0` for the top does. Grep your paint callbacks for a literal zero in a row rect
+before upgrading.
 
 **Row indices are model indices.** Rows are numbered in the order you added them.
 Collapsing a group never renumbers anything, and hidden rows still work with every row API
@@ -138,8 +161,10 @@ including selection. Everything the control hands back — `PAINTINFO.itemID`,
 header. One level, no nesting. Headers are selectable and *are* returned by `GetSelItems`,
 so use `CListBox_IsHeader()` to tell them apart.
 
-**Selection lives on the rows**, not in the listbox's own selection bits, which is why it
-survives collapse/expand. `GetSelItems` reports every selected row, hidden ones included.
+**Selection lives on the rows**, which is why it survives collapse/expand. (This was
+deliberate back when a `LISTBOX` with its own selection bits was still underneath; now
+there is no other place it could live.) `GetSelItems` reports every selected row, hidden
+ones included.
 
 ## Input
 
@@ -181,10 +206,16 @@ it can be reused standalone.
 ## Building
 
 ```
-fbc -i <path-containing-AfxNova> main.bas
+build.bat
 ```
 
-Built and tested with FreeBASIC 1.10.1 (64-bit) against AfxNova.
+Built and tested with FreeBASIC 1.10.1 (64-bit) against AfxNova. `main.rc` embeds a
+manifest that makes the demo **DPI-aware**; that is not cosmetic, since geometry measured
+in a DPI-unaware process is a measurement of a stretched bitmap.
+
+The vendored `clsDoubleBuffer` renders **geometry with GDI+ and text with GDI**, selected by
+the `#define DBUF_GDIPLUS` at the top of `clsDoubleBuffer.bi` (defined = GDI+, the default;
+undefine it for plain GDI). The control's own source is identical either way.
 
 ## Design notes
 
