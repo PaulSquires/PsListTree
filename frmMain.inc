@@ -1,12 +1,12 @@
 #include once "frmMain.bi"
-#include once "clsDoubleBuffer.bi"
+#include once "CBufferPaint.bi"
 
 
 ' ========================================================================================
 ' Process WM_PAINT message for window/dialog: frmMain
 ' ========================================================================================
 function frmMain_OnPaint( byval hwnd as HWND ) as LRESULT
-    dim as clsDoubleBuffer b
+    dim as CBufferPaint b
 
     b.BeginDoubleBuffer(hwnd)
     b.SetBackColor( theme.BackColorPanel )

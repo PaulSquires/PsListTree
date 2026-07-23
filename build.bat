@@ -2,11 +2,8 @@
 rem ========================================================================================
 rem  CListBox demo harness build script.
 rem
-rem  Usage:  build.bat          builds main.exe (GDI+ -- clsDoubleBuffer's default backend)
+rem  Usage:  build.bat          builds main.exe
 rem          build.bat clean    deletes build output
-rem
-rem  clsDoubleBuffer selects GDI vs GDI+ with the `#define DBUF_GDIPLUS` at the top of
-rem  clsDoubleBuffer.bi (defined = GDI+, the default). There is no command-line backend switch.
 rem ========================================================================================
 
 setlocal
