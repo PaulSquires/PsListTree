@@ -71,8 +71,7 @@ private function CListBox_SetTopVis( byval pList as CLISTBOX ptr, byval vis as i
     if newTop <> pList->nTopVis then
         pList->nTopVis = newTop
         dim as HWND hSurf = GetDlgItem( pList->hWin, pList->idc_ListBox )
-        ' Whole surface, not a scrolled band: under D2D the back buffer is undefined after
-        ' a present, so every paint redraws the client anyway (README F2/F7).
+        ' Whole surface, not a scrolled band: the buffer redraws the whole client each paint.
         if hSurf then InvalidateRect( hSurf, NULL, FALSE )
     end if
     return pList->nTopVis
@@ -1261,9 +1260,8 @@ end function
 '
 ' This replaces WM_MEASUREITEM + WM_DRAWITEM and is the point of the whole rewrite. The
 ' system listbox turned one WM_PAINT into N WM_DRAWITEM messages, each with its own buffer
-' and its own blit; under Direct2D each of those was a full BindDC/BeginDraw/EndDraw cycle
-' at ~600 us apiece (README F8), so a 34-row repaint paid 34 cycles. Here the whole client
-' is one cycle.
+' and its own blit, so a 34-row repaint paid 34 buffer create/blit cycles. Here the whole
+' client is one cycle.
 '
 ' ONE CONTRACT CHANGE, and it is the only one hosts can see: p->rc and the cell rects are
 ' now in the SURFACE's CLIENT coordinates rather than in a row-sized buffer starting at
@@ -1271,10 +1269,8 @@ end function
 ' painters do, since they must already honour the row's left edge and width -- needs no
 ' change at all. One that hardcoded 0 for the top would.
 '
-' The plan called for a render-target transform per row to keep p->rc.top = 0 and avoid
-' even that. It was not used: transforms are a Direct2D feature, and the GDI and GDI+
-' backends have no equivalent, so it would have made the three builds diverge in exactly
-' the code the A/B comparison depends on being identical.
+' Keeping p->rc.top = 0 with a per-row coordinate transform was considered and rejected: a
+' plain client-relative rect is simpler and needs no transform machinery.
 ' ========================================================================================
 function CListBox_OnPaintSurface( byval hSurf as HWND ) as LRESULT
     dim as CLISTBOX ptr pList = GetListBoxPointer( GetParent( hSurf ) )
@@ -1437,11 +1433,6 @@ function CListBox_WndProc( _
     ' now, empty or not, so the problem cannot arise. pList->hBackBrush went with it.
 
     case WM_NCDESTROY
-        ' Release this window's Direct2D render target, here rather than in a new
-        ' WM_DESTROY case because this is already where the control tears itself down.
-        ' Unconditional: a no-op on the GDI and GDI+ backends.
-        clsDoubleBuffer_ReleaseTarget( hwnd )
-
         ' Delete the stored listbox data pointer
         dim as CLISTBOX ptr pList = GetListBoxPointer(hwnd)
         if pList then
@@ -1707,7 +1698,7 @@ function CListBoxSurface_WndProc ( _
             ' This used to hand off to DefSubclassProc, which fanned out into one
             ' WM_DRAWITEM per row -- and collapsing those N paint cycles into one is the
             ' whole of the speed win this rewrite bought. It is backend-independent: it
-            ' made GDI 25% faster and GDI+ 38% faster as well as Direct2D 35x.
+            ' made GDI 25% faster and GDI+ 38% faster.
             return CListBox_OnPaintSurface( hWin )
 
         case WM_ERASEBKGND
@@ -1828,10 +1819,8 @@ function CListBoxSurface_WndProc ( _
                 pList->hotTimerOn = true
             end if
 
-            ' Invalidate only the rows whose hot state actually changed. Note this is a
-            ' hint, not an optimisation, under D2D: with PRESENT_OPTIONS the back buffer
-            ' is undefined after a present, so the paint redraws the whole client anyway
-            ' (README F7). It still spares the GDI backends a full repaint per mouse move.
+            ' Invalidate only the rows whose hot state actually changed, sparing the buffer
+            ' a full-client repaint per mouse move.
             dim as RECT rc
             dim as long idx = CListBox_VisIndexFromPoint( pList, GET_X_LPARAM(_lParam), GET_Y_LPARAM(_lParam) )
             if (pList <> 0) andalso (idx >= 0) then
@@ -1976,10 +1965,6 @@ function CListBoxSurface_WndProc ( _
                 KillTimer( hWin, IDT_CLISTBOX_HOTTRACK )
                 pList->hotTimerOn = false
             end if
-            ' Release this window's Direct2D render target. Unconditional: a no-op on the
-            ' GDI and GDI+ backends. The surface is the window that paints the rows, so it
-            ' owns a target of its own, distinct from the container's.
-            clsDoubleBuffer_ReleaseTarget( hWin )
             ' No RemoveWindowSubclass: this is the window's own procedure now, not a
             ' subclass hung off a system listbox.
     end select

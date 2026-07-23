@@ -329,13 +329,6 @@ function CVScrollBar_WndProc( _
         end if
 
     case WM_NCDESTROY
-        ' A D2D render target is cached per window and OUTLIVES the clsDoubleBuffer that
-        ' used it, so nothing in the buffer's own destructor can free it -- missing this
-        ' leaks a device per control instance. Written unconditionally: it is a no-op on
-        ' the GDI backends, and a host obligation behind an #ifdef is how a backend swap
-        ' becomes a leak on one branch. clsDoubleBuffer_ShutdownD2D reports anything still
-        ' registered at exit, which is what makes the obligation checkable.
-        clsDoubleBuffer_ReleaseTarget( hwnd )
         if pSB then
             CVScrollBar_StopRepeat( pSB )
             if pSB->hotTimerOn then KillTimer( hwnd, IDT_CVSCROLL_HOTTRACK )

@@ -1,11 +1,6 @@
 #include once "frmMain.bi"
 #include once "clsDoubleBuffer.bi"
 
-' FreeBASIC's winuser.bi does not declare this one.
-#ifndef WM_DPICHANGED
-    #define WM_DPICHANGED &h02E0
-#endif
-
 
 ' ========================================================================================
 ' Process WM_PAINT message for window/dialog: frmMain
@@ -84,30 +79,11 @@ function frmMain_WndProc( _
         HANDLE_MSG (hwnd, WM_DESTROY,       frmMain_OnDestroy)
 
         case WM_NCDESTROY
-            ' Host obligation: release this window's cached D2D render target. No-op on
-            ' the GDI backends, so it is written unconditionally -- see the longer note in
-            ' CListBox.inc's own WM_NCDESTROY. Note that a single CListBox owns FOUR
-            ' painting windows (container, row surface, column header, scrollbar); each
-            ' releases its own, and this line covers only the form.
-            clsDoubleBuffer_ReleaseTarget( hwnd )
             ' delete the allocated memory for window
             dim as CWindow ptr pWindow = AfxCWindowPtr(hwnd)
             if pWindow then delete(pWindow)
             HWND_FRMMAIN = 0
             return 0
-
-        case WM_DPICHANGED
-            ' The window moved to a display with a different DPI, so the DirectWrite text
-            ' mode chosen at startup may no longer be the right one. Re-evaluate and
-            ' repaint everything -- the header band and the scrollbar draw text too, and a
-            ' half-switched window is a confusing thing to look at.
-            '
-            ' Without this the auto-selection is a STARTUP-ONLY decision that silently
-            ' goes stale the first time someone drags the window to their second monitor.
-            #ifdef DBUF_IMPL_D2D
-                DBufD2D_AutoSelectTextMode( hwnd )
-                AfxRedrawWindow( hwnd )
-            #endif
 
         case WM_ERASEBKGND
             return true      ' prevents painting the background
@@ -391,13 +367,14 @@ end sub
 function Header_AutoSizeCallback( byval hHeader as HWND, byval idx as integer ) as integer
     ' Demo best-fit: measure the column CAPTION with the header font + 2*padding. (A
     ' real host measures its widest cell; the standalone header has no cell data.)
-    ' Measured through clsDoubleBuffer_MeasureText, i.e. by whichever engine will actually
-    ' draw the caption. A HOST has the same obligation a control does here: an autosize
-    ' computed with GDI's extents while DirectWrite renders the text produces a column
-    ' that is a pixel or two short, and "best fit" that clips is worse than no autosize.
     dim as integer bestW = 0
     dim as DWSTRING wszText = CColumnHeader_GetColumnText( hHeader, idx )
-    bestW = clsDoubleBuffer_MeasureText( wszText, ghFont(GUIFONTBOLD_10) ).cx
+    dim as HDC hDC = GetDC( hHeader )
+    dim as HFONT hOldFont = SelectObject( hDC, ghFont(GUIFONTBOLD_10) )
+    dim as SIZE sz
+    if GetTextExtentPoint32W( hDC, wszText.vptr, len(wszText), @sz ) then bestW = sz.cx
+    SelectObject( hDC, hOldFont )
+    ReleaseDC( hHeader, hDC )
     if bestW > 0 then bestW += CColumnHeader_GetPadding( hHeader ) * 2
     dim as string s = "header autosize col=" & str(idx) & " -> " & str(bestW)
     print s
@@ -902,14 +879,6 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
     print
 
     
-    ' Choose the DirectWrite text mode from THIS display's DPI, before anything is drawn.
-    ' A host obligation with no error path: skip it and the mode stays on the library's
-    ' default rather than the one the display calls for, and nothing says so. Re-run on
-    ' WM_DPICHANGED (see frmMain_WndProc) so a monitor move re-decides.
-    #ifdef DBUF_IMPL_D2D
-        DBufD2D_AutoSelectTextMode( HWND_FRMMAIN )
-    #endif
-
     UpdateWindow( pWindow->hWindow )
     ShowWindow( pWindow->hWindow, SW_SHOW )
 

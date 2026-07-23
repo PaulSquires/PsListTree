@@ -139,8 +139,8 @@ were just get/set top index. Selection, focus, keyboard navigation, hot tracking
 collapse, cell storage, the scrollbar and the header were already this control's own code.
 
 Collapsing N paint cycles into one is **the** performance result of that change, and it is
-backend-independent: a 2000-row repaint got 25% faster on GDI and 38% faster on GDI+, as
-well as 35× faster on Direct2D. Gone with the listbox: the `WM_DRAWITEM`/`WM_MEASUREITEM`
+backend-independent: a 2000-row repaint got 25% faster on GDI and 38% faster on GDI+. Gone
+with the listbox: the `WM_DRAWITEM`/`WM_MEASUREITEM`
 path, the one-row back-buffer cache (`EnsureCache`/`FreeCache` and five fields),
 `WM_CTLCOLORLISTBOX` and its brush, and the empty-client-area helper — the surface fills
 its own client whether or not there are rows in it.
@@ -206,42 +206,16 @@ it can be reused standalone.
 ## Building
 
 ```
-build.bat gdi | gdiplus | d2d
+build.bat
 ```
 
 Built and tested with FreeBASIC 1.10.1 (64-bit) against AfxNova. `main.rc` embeds a
 manifest that makes the demo **DPI-aware**; that is not cosmetic, since geometry measured
 in a DPI-unaware process is a measurement of a stretched bitmap.
 
-## Rendering backend
-
-The vendored `clsDoubleBuffer` builds against **GDI, GDI+ or Direct2D + DirectWrite**.
-The control's own source is identical on all three.
-
-Adopting the D2D backend adds host obligations, all of which fail **silently**:
-
-```freebasic
-' 1. bracket the message pump, beside AfxGdipInit / AfxGdipShutdown
-clsDoubleBuffer_InitD2D()  ...  clsDoubleBuffer_ShutdownD2D()
-
-' 2. in the teardown of EVERY window that paints. Unconditional -- a no-op on GDI/GDI+.
-case WM_NCDESTROY
-    clsDoubleBuffer_ReleaseTarget( hwnd )
-
-' 3. register private fonts a SECOND time -- DirectWrite cannot see an FR_PRIVATE font,
-'    so the group chevrons and the sort arrow would fall back with no error at all.
-clsDoubleBuffer_AddPrivateFont( wszFontFile )
-
-' 4. choose the text mode from the display, at startup AND on WM_DPICHANGED. Skip it and
-'    the mode stays on the library default rather than the one this display calls for.
-DBufD2D_AutoSelectTextMode( hwnd )
-```
-
-**Obligation 2 is per-window, and one CListBox owns four painting windows** — container,
-row surface, column header and scrollbar. Each releases its own; a host only has to cover
-its own forms. `clsDoubleBuffer_ShutdownD2D` counts and reports whatever is still
-registered at exit, which is what makes the obligation checkable rather than merely
-documented: with all the calls removed, this two-instance demo reports **8** live targets.
+The vendored `clsDoubleBuffer` renders **geometry with GDI+ and text with GDI**, selected by
+the `#define DBUF_GDIPLUS` at the top of `clsDoubleBuffer.bi` (defined = GDI+, the default;
+undefine it for plain GDI). The control's own source is identical either way.
 
 ## Design notes
 

@@ -89,57 +89,13 @@ function WinMain( _
     end if
 
 
-    ' Initialize GDI+ (one of clsDoubleBuffer's rendering backends -- see the
-    ' DBUF_BACKEND_* switch at the top of clsDoubleBuffer.bi). Must be running before the
-    ' first WM_PAINT builds a buffer, and must outlive every one of them, so it brackets
-    ' frmMain_Show. Called unconditionally rather than behind the backend switch: it is
-    ' harmless when nothing uses GDI+, and putting a host obligation behind an #ifdef is
-    ' how a backend swap turns into a crash on the other branch.
+    ' Initialize GDI+ (clsDoubleBuffer's rendering backend -- see the DBUF_GDIPLUS switch at
+    ' the top of clsDoubleBuffer.bi). Must be running before the first WM_PAINT builds a
+    ' buffer, and must outlive every one of them, so it brackets frmMain_Show.
     dim as ULONG_PTR gdipToken = AfxGdipInit()
-
-    #ifdef DBUF_IMPL_D2D
-        ' The Direct2D equivalent, bracketing the pump the same way. Its companion
-        ' obligation is per-window -- clsDoubleBuffer_ReleaseTarget( hwnd ) from the
-        ' teardown of everything that paints. This demo has FOUR such windows per list:
-        ' the container, the row surface, the column header and the scrollbar. Each owns
-        ' its own target, and each releases it in its own WndProc.
-        if clsDoubleBuffer_InitD2D() = false then
-            MessageBox( 0, "Direct2D / DirectWrite initialisation failed. Aborting.", _
-                        "Error", MB_OK or MB_ICONWARNING )
-            return 1
-        end if
-
-        ' Register the SAME .ttf a second time, with DirectWrite. AddFontResourceEx above
-        ' made it visible to GDI and GDI+ only -- DirectWrite builds its collection from
-        ' INSTALLED fonts and cannot see a process-private GDI font. Without this the
-        ' group chevrons and the header's sort arrow fall back silently, and on a machine
-        ' where Segoe Fluent Icons happens to be installed system-wide they render
-        ' correctly anyway, hiding the bug. See the long note in dbufD2D.bi.
-        if clsDoubleBuffer_AddPrivateFont( wszFontFile ) = false then
-            MessageBox( 0, "DirectWrite could not load 'SegoeFluentIcons.ttf'. " & _
-                           "Icon glyphs will fall back to the wrong font.", _
-                        "Warning", MB_OK or MB_ICONWARNING )
-        end if
-
-        ' Device-layer assertions, then exit (same env-gate shape as CLISTBOX_SELFTEST).
-        if environ("DBUF_D2DTEST") = "1" then
-            clsDoubleBuffer_RunD2DSelfTest()
-            clsDoubleBuffer_ShutdownD2D()
-            AfxGdipShutdown( gdipToken )
-            RemoveFontResourceEx( wszFontFile.vptr, FR_PRIVATE, NULL )
-            CoUninitialize
-            return 0
-        end if
-    #endif
 
     ' Show the main form
     function = frmMain_Show( 0 )
-
-    #ifdef DBUF_IMPL_D2D
-        ' After every window is gone, so no render target can still be in use. Reports any
-        ' target whose window forgot to release it rather than quietly freeing it.
-        clsDoubleBuffer_ShutdownD2D()
-    #endif
 
     ' Unload the font file. Must mirror the AddFontResourceEx call above, flags included --
     ' plain RemoveFontResource does not match an FR_PRIVATE registration and leaks it.

@@ -223,7 +223,7 @@ declare function CListBox_PositionWindows( byval hwnd as HWND ) as LRESULT
 ' solely so WM_DRAWITEM would not create and destroy a compatible DC and bitmap for every
 ' row on every repaint. With the whole surface painted in a single buffer there is no
 ' per-row buffer to cache, and its disappearance is a good part of why the rewrite made
-' the GDI backends faster too, not just the Direct2D one.
+' the GDI and GDI+ backends faster too.
 destructor CLISTBOX()
 end destructor
 
