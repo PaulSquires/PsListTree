@@ -1,4 +1,4 @@
-# CColumnHeader
+# PsColumnHeader
 
 An owner-drawn column header band for FreeBASIC Win32 applications: a horizontal strip of
 column cells with draggable dividers between them, the last (or a nominated) column absorbing
@@ -16,7 +16,7 @@ the measurement), a click-on-the-caption notification for host-driven sorting, a
 tooltips.
 
 The control never sorts, never takes focus, and never creates a child window.
-[CListBox](README.md) embeds one above its rows, but the control works perfectly well on its
+[PsListBox](README.md) embeds one above its rows, but the control works perfectly well on its
 own.
 
 ---
@@ -27,12 +27,12 @@ own.
 
 | File | Purpose |
 |---|---|
-| `CColumnHeader.bi` | Declarations — types, callbacks, constants, function prototypes |
-| `CColumnHeader.inc` | Implementation |
-| `CBufferPaint.bi` | The flicker-free drawing surface the control paints through |
-| `CBufferPaint.inc` | Its implementation |
+| `PsColumnHeader.bi` | Declarations — types, callbacks, constants, function prototypes |
+| `PsColumnHeader.inc` | Implementation |
+| `PsBufferPaint.bi` | The flicker-free drawing surface the control paints through |
+| `PsBufferPaint.inc` | Its implementation |
 
-**AfxNova is required.** The control is built on `CWindow`, and `CBufferPaint` draws through
+**AfxNova is required.** The control is built on `CWindow`, and `PsBufferPaint` draws through
 `AfxNova\CGdiPlus.inc`. Sources include AfxNova relative to the workspace root
 (`#include once "AfxNova\CWindow.inc"`), so builds need the workspace root on the include
 path:
@@ -41,12 +41,12 @@ path:
 fbc64.exe -i "C:\dev" main.bas
 ```
 
-**Include order.** `CColumnHeader.inc` pulls in its own `.bi`, which pulls in
-`CBufferPaint.bi`. The two implementation files go in this order:
+**Include order.** `PsColumnHeader.inc` pulls in its own `.bi`, which pulls in
+`PsBufferPaint.bi`. The two implementation files go in this order:
 
 ```freebasic
-#include once "CBufferPaint.inc"
-#include once "CColumnHeader.inc"
+#include once "PsBufferPaint.inc"
+#include once "PsColumnHeader.inc"
 ```
 
 with the AfxNova headers ahead of both:
@@ -59,8 +59,8 @@ with the AfxNova headers ahead of both:
 using AfxNova
 ```
 
-If you are using the header **inside a CListBox**, it must come before `CListBox.inc` —
-`CListBox.bi` names the `HDR_*` callback types without including this header itself. See the
+If you are using the header **inside a PsListBox**, it must come before `PsListBox.inc` —
+`PsListBox.bi` names the `HDR_*` callback types without including this header itself. See the
 include-order note in [README.md](README.md).
 
 **GDI+ must be running before the first repaint and must outlive the last one.** All geometry
@@ -73,7 +73,7 @@ AfxGdipShutdown( gdipToken )
 ```
 
 `AfxGdipShutdown` must come after every window is destroyed, because each repaint builds and
-tears down a `CBufferPaint`.
+tears down a `PsBufferPaint`.
 
 **Never name an identifier `ok`.** GDI+ defines `Ok = 0` as a `Status` enum value in namespace
 `AfxNova`, and hosts customarily say `using AfxNova`. An existing variable, parameter or
@@ -91,31 +91,31 @@ requirement of its own either.
 
 ```freebasic
 ' Create it and place it. The control is created zero-sized and hidden.
-dim as HWND hHdr = CColumnHeader_Create( hWndParent, IDC_MYFORM_HEADER )
+dim as HWND hHdr = PsColumnHeader_Create( hWndParent, IDC_MYFORM_HEADER )
 SetWindowPos( hHdr, 0, x, y, cx, headerHeight, SWP_NOZORDER or SWP_SHOWWINDOW )
 
 ' You MUST supply a painter -- without one only the flat background is drawn.
-CColumnHeader_SetPaintCallback( hHdr, @MyHeader_PaintColumn )
+PsColumnHeader_SetPaintCallback( hHdr, @MyHeader_PaintColumn )
 
 ' Appearance. The font is borrowed -- you keep ownership and destroy it yourself.
-CColumnHeader_SetBackColor( hHdr, theme.BackColorScrollBar )
-CColumnHeader_SetFont( hHdr, ghFont(GUIFONTBOLD_10) )
+PsColumnHeader_SetBackColor( hHdr, theme.BackColorScrollBar )
+PsColumnHeader_SetFont( hHdr, ghFont(GUIFONTBOLD_10) )
 
 ' Columns. Widths are PIXELS. The last one is the fill column by default.
-CColumnHeader_AddColumn( hHdr, "Name", 160 )
-CColumnHeader_AddColumn( hHdr, "Size", 70 )
-CColumnHeader_AddColumn( hHdr, "Type" )
+PsColumnHeader_AddColumn( hHdr, "Name", 160 )
+PsColumnHeader_AddColumn( hHdr, "Size", 70 )
+PsColumnHeader_AddColumn( hHdr, "Type" )
 
 ' Interaction hooks, all optional.
-CColumnHeader_SetWidthChangedCallback( hHdr, @MyHeader_WidthChanged )
-CColumnHeader_SetClickCallback( hHdr, @MyHeader_Click )
-CColumnHeader_SetAutoSizeCallback( hHdr, @MyHeader_AutoSize )
+PsColumnHeader_SetWidthChangedCallback( hHdr, @MyHeader_WidthChanged )
+PsColumnHeader_SetClickCallback( hHdr, @MyHeader_Click )
+PsColumnHeader_SetAutoSizeCallback( hHdr, @MyHeader_AutoSize )
 ```
 
 And the painter:
 
 ```freebasic
-sub MyHeader_PaintColumn( byval p as CCOLUMNHEADER_PAINTINFO ptr )
+sub MyHeader_PaintColumn( byval p as PSCOLUMNHEADER_PAINTINFO ptr )
     ' State priority for the cell: pressed > hot > normal
     dim as COLORREF backclr, foreclr
     if p->isPressed then
@@ -130,7 +130,7 @@ sub MyHeader_PaintColumn( byval p as CCOLUMNHEADER_PAINTINFO ptr )
 
     ' Caption, inset by the control's padding -- the space the layout accounts for.
     dim as RECT rcText = p->rc
-    dim as integer pad = CColumnHeader_GetPadding( p->hHeader )
+    dim as integer pad = PsColumnHeader_GetPadding( p->hHeader )
     rcText.left += pad : rcText.right -= pad
     p->b->SetFont( ghFont(GUIFONTBOLD_10) )
     p->b->PaintText( p->wszCaption, @rcText, DT_LEFT )
@@ -157,13 +157,13 @@ Auto-fit needs a measurement only you can make, because you own the cell data:
 function MyHeader_AutoSize( byval hHeader as HWND, byval idx as integer ) as integer
     ' Measure your widest cell in that column, add the padding on both sides.
     ' Return <= 0 for "no change".
-    return bestW + CColumnHeader_GetPadding( hHeader ) * 2
+    return bestW + PsColumnHeader_GetPadding( hHeader ) * 2
 end function
 ```
 
-**Inside a CListBox**, do not create the header — the list already owns one. Reach it with
-`CListBox_GetHeader`, define columns with the `CListBox_*Column*` wrappers, and register
-callbacks with `CListBox_SetHeader*` / `CListBox_SetColumn*`. See [README.md](README.md).
+**Inside a PsListBox**, do not create the header — the list already owns one. Reach it with
+`PsListBox_GetHeader`, define columns with the `PsListBox_*Column*` wrappers, and register
+callbacks with `PsListBox_SetHeader*` / `PsListBox_SetColumn*`. See [README.md](README.md).
 
 ---
 
@@ -171,7 +171,7 @@ callbacks with `CListBox_SetHeader*` / `CListBox_SetColumn*`. See [README.md](RE
 
 ### The handle is a real HWND
 
-`CColumnHeader_Create` returns an ordinary window handle, and every `CColumnHeader_*` function
+`PsColumnHeader_Create` returns an ordinary window handle, and every `PsColumnHeader_*` function
 takes it. It is not an opaque type, so you can treat the control as the window it is —
 `SetWindowPos` to place and size it, `ShowWindow` to show it, `GetDlgItem` to find it by the
 `CtrlID` you passed at creation.
@@ -180,7 +180,7 @@ There are no child windows. Every message is handled by the control's own proced
 
 ### It is created zero-sized and hidden
 
-`CColumnHeader_Create` gives the control the styles `WS_CHILD`, `WS_CLIPSIBLINGS` and
+`PsColumnHeader_Create` gives the control the styles `WS_CHILD`, `WS_CLIPSIBLINGS` and
 `WS_CLIPCHILDREN`, and adds `CS_DBLCLKS` to its window class so divider double-clicks arrive.
 `WS_VISIBLE` is deliberately absent, so a newly created control shows nothing until you size it
 and show it.
@@ -228,7 +228,7 @@ The fill column absorbs whatever width the fixed columns leave over. It **shrink
 grows** with the window, but never below its own minimum. That is what stops a dead strip
 appearing to the right of the last column when the window widens.
 
-`CColumnHeader_SetFillColumn` takes three kinds of value:
+`PsColumnHeader_SetFillColumn` takes three kinds of value:
 
 | Value | Meaning |
 |---|---|
@@ -236,11 +236,11 @@ appearing to the right of the last column when the window widens.
 | `CCOLHDR_FILL_NONE` | No fill column; columns end where their widths end |
 | a column index | That specific column, tracked across inserts and deletes |
 
-`CColumnHeader_GetFillColumn` returns the **resolved** index, or -1 for none.
+`PsColumnHeader_GetFillColumn` returns the **resolved** index, or -1 for none.
 
 A stored index looks after itself: inserting at or before it shifts it up, deleting before it
 shifts it down, and deleting the fill column itself falls back to `CCOLHDR_FILL_LAST`.
-`CColumnHeader_Clear` resets the designation to `CCOLHDR_FILL_LAST` as well.
+`PsColumnHeader_Clear` resets the designation to `CCOLHDR_FILL_LAST` as well.
 
 **The fill column's own right-hand divider is not grabbable.** Its width is derived, so there
 is nothing meaningful to drag it to. Your painter is told which column that is
@@ -252,13 +252,13 @@ When the columns are collectively wider than the client, the layout does not squ
 later rects simply extend past the right edge. Clipping is the paint pass's job, and since the
 cursor cannot reach past the edge, hit-testing stays correct for free.
 
-There is no horizontal scrolling. `CColumnHeader_SetXOffset` shifts the entire column run left
+There is no horizontal scrolling. `PsColumnHeader_SetXOffset` shifts the entire column run left
 by a pixel amount and every rect follows, which is the hook a horizontal scrollbar would drive;
 nothing in the control moves it for you, and it is 0 unless you set it.
 
 ### Padding is a paint-time value
 
-`CColumnHeader_GetPadding` is a number your painter is expected to inset the caption by. The
+`PsColumnHeader_GetPadding` is a number your painter is expected to inset the caption by. The
 control does not measure text and does not use padding in the layout — widths are stored, not
 derived from captions. Read it in your paint callback (and in your auto-fit measurement) so
 captions and any cells you draw underneath line up.
@@ -267,14 +267,14 @@ captions and any cells you draw underneath line up.
 
 A boundary is grabbable within ± 3 pixels (DPI-scaled) of a column's right edge. Inside a
 gutter, the gesture is a resize, not a column press — which is why
-`CCOLUMNHEADER_MESSAGEINFO.idx` is -1 there even though the cursor is over a column.
+`PSCOLUMNHEADER_MESSAGEINFO.idx` is -1 there even though the cursor is over a column.
 
 When two boundaries nearly coincide, because a column sits at its minimum width, the gutters
 are tested right to left, so the later divider wins. That matches listview feel.
 
 ### Programmatic changes are silent
 
-`CColumnHeader_SetColumnWidth` stores a width, re-lays out and repaints, but fires **no**
+`PsColumnHeader_SetColumnWidth` stores a width, re-lays out and repaints, but fires **no**
 `WidthChanged` callback. That notification is reserved for user interaction — a divider drag or
 an applied auto-fit. It means you can call the setter from inside your own resize handler
 without recursing.
@@ -317,7 +317,7 @@ up would release a capture never taken.
 ### The control never sorts
 
 `ClickCallback` is the hook and nothing more. Reorder your own data, then repaint a sort glyph
-from your paint callback and call `CColumnHeader_Refresh`. The control has no notion of a sort
+from your paint callback and call `PsColumnHeader_Refresh`. The control has no notion of a sort
 column.
 
 ### Tooltips
@@ -373,21 +373,21 @@ Firm properties of the control, not settings:
 - **Inserting or deleting a column cancels any live press or drag** without firing callbacks,
   and clears the hover state — a gesture whose target just shifted is ambiguous, so it is
   abandoned rather than guessed at.
-- **Inside a CListBox, the `WidthChanged` slot is taken.** Use
-  `CListBox_SetColumnResizeCallback` instead; see [Related controls](#related-controls).
+- **Inside a PsListBox, the `WidthChanged` slot is taken.** Use
+  `PsListBox_SetColumnResizeCallback` instead; see [Related controls](#related-controls).
 
 ---
 
 ## API reference
 
-Every function takes the handle from `CColumnHeader_Create` as its first argument, written
+Every function takes the handle from `PsColumnHeader_Create` as its first argument, written
 `h` in the tables below.
 
 ### Creation
 
 | Function | Description |
 |---|---|
-| `CColumnHeader_Create( hWndParent, CtrlID ) as HWND` | Creates the control as a child of `hWndParent` and returns its window handle. `CtrlID` becomes the window's `GWLP_ID`, so `GetDlgItem` finds it. There are no child controls. Created zero-sized and hidden — place it with `SetWindowPos`. |
+| `PsColumnHeader_Create( hWndParent, CtrlID ) as HWND` | Creates the control as a child of `hWndParent` and returns its window handle. `CtrlID` becomes the window's `GWLP_ID`, so `GetDlgItem` finds it. There are no child controls. Created zero-sized and hidden — place it with `SetWindowPos`. |
 
 ### Columns
 
@@ -396,59 +396,59 @@ Every function takes the handle from `CColumnHeader_Create` as its first argumen
 
 | Function | Description |
 |---|---|
-| `CColumnHeader_AddColumn( h, Text, nWidth = 100, nMinWidth = 0, itemData = 0 ) as integer` | Appends a column. Widths are **pixels**. A `nWidth` of 0 or less leaves the column at its 100-pixel default; a `nMinWidth` of 0 or less leaves it at 0, meaning the scaled `CCOLHDR_DEFAULT_MINWIDTH` floor applies. |
-| `CColumnHeader_InsertColumn( h, idx, Text, nWidth = 100, nMinWidth = 0, itemData = 0 ) as integer` | Inserts at `idx`, shifting later columns up. `idx` is clamped to `[0, count]` and the index used is returned. A stored fill index shifts up with it; any live press or drag is cancelled and the hover state cleared. |
-| `CColumnHeader_DeleteColumn( h, idx ) as boolean` | Deletes the column. FALSE for an invalid index. A stored fill index shifts down, or falls back to `CCOLHDR_FILL_LAST` if it *was* the deleted column. Cancels any live gesture. |
-| `CColumnHeader_Clear( h )` | Removes every column and resets the fill designation to `CCOLHDR_FILL_LAST`. |
-| `CColumnHeader_GetCount( h ) as integer` | How many columns are defined. |
-| `CColumnHeader_Refresh( h )` | Marks the layout stale and repaints with a background erase. Rarely needed — every mutator does it for you. Useful after changing host state your painter reads, such as a sort column. |
+| `PsColumnHeader_AddColumn( h, Text, nWidth = 100, nMinWidth = 0, itemData = 0 ) as integer` | Appends a column. Widths are **pixels**. A `nWidth` of 0 or less leaves the column at its 100-pixel default; a `nMinWidth` of 0 or less leaves it at 0, meaning the scaled `CCOLHDR_DEFAULT_MINWIDTH` floor applies. |
+| `PsColumnHeader_InsertColumn( h, idx, Text, nWidth = 100, nMinWidth = 0, itemData = 0 ) as integer` | Inserts at `idx`, shifting later columns up. `idx` is clamped to `[0, count]` and the index used is returned. A stored fill index shifts up with it; any live press or drag is cancelled and the hover state cleared. |
+| `PsColumnHeader_DeleteColumn( h, idx ) as boolean` | Deletes the column. FALSE for an invalid index. A stored fill index shifts down, or falls back to `CCOLHDR_FILL_LAST` if it *was* the deleted column. Cancels any live gesture. |
+| `PsColumnHeader_Clear( h )` | Removes every column and resets the fill designation to `CCOLHDR_FILL_LAST`. |
+| `PsColumnHeader_GetCount( h ) as integer` | How many columns are defined. |
+| `PsColumnHeader_Refresh( h )` | Marks the layout stale and repaints with a background erase. Rarely needed — every mutator does it for you. Useful after changing host state your painter reads, such as a sort column. |
 
 ### Column contents
 
 | Function | Description |
 |---|---|
-| `CColumnHeader_GetColumnText( h, idx ) as DWSTRING` | The column's caption. `""` for an invalid index. |
-| `CColumnHeader_SetColumnText( h, idx, Text ) as boolean` | Sets it and repaints **that cell only** — captions do not drive layout, since widths are stored. FALSE for an invalid index. |
-| `CColumnHeader_GetColumnItemData( h, idx ) as integer` | The column's user value. 0 for an invalid index. |
-| `CColumnHeader_SetColumnItemData( h, idx, itemData ) as boolean` | Sets it. FALSE for an invalid index. Does not repaint — the control never draws it. |
+| `PsColumnHeader_GetColumnText( h, idx ) as DWSTRING` | The column's caption. `""` for an invalid index. |
+| `PsColumnHeader_SetColumnText( h, idx, Text ) as boolean` | Sets it and repaints **that cell only** — captions do not drive layout, since widths are stored. FALSE for an invalid index. |
+| `PsColumnHeader_GetColumnItemData( h, idx ) as integer` | The column's user value. 0 for an invalid index. |
+| `PsColumnHeader_SetColumnItemData( h, idx, itemData ) as boolean` | Sets it. FALSE for an invalid index. Does not repaint — the control never draws it. |
 
 ### Geometry and layout
 
 | Function | Description |
 |---|---|
-| `CColumnHeader_GetColumnWidth( h, idx ) as integer` | The column's width in pixels, already raised to its effective minimum. For the **fill** column this is the laid-out width, forcing a pending layout first. 0 for an invalid index. |
-| `CColumnHeader_SetColumnWidth( h, idx, nWidth ) as boolean` | Stores the width, clamped up to the column's effective minimum, then re-lays out and repaints. **Silent** — no `WidthChanged` callback. FALSE for an invalid index. Called on a column whose divider is being dragged at that moment, the new value becomes the drag's base: a later ESC restores to it, and the drag resumes from it re-anchored to the current cursor position. |
-| `CColumnHeader_GetColumnMinWidth( h, idx ) as integer` | The column's **own stored** minimum. 0 means "use the control default". |
-| `CColumnHeader_SetColumnMinWidth( h, idx, nMinWidth ) as boolean` | Sets it; negatives become 0. Re-lays out and repaints. Does not rewrite a smaller stored width — the clamp is applied at layout and read time. FALSE for an invalid index. |
-| `CColumnHeader_GetFillColumn( h ) as integer` | The **resolved** index of the fill column, or -1 for none. |
-| `CColumnHeader_SetFillColumn( h, idx ) as boolean` | Takes a column index, `CCOLHDR_FILL_LAST` or `CCOLHDR_FILL_NONE`. FALSE for an index that is neither valid nor one of those two constants. |
-| `CColumnHeader_GetColumnRect( h, idx, byref rc ) as boolean` | The column's rect in client coordinates. Forces any pending layout, so the result is always current — an embedding host reads its row-cell x-coordinates from here. Returns FALSE and empties `rc` for an invalid index. |
-| `CColumnHeader_HitTestDivider( h, x, y ) as integer` | Which column's right-edge divider gutter contains this client-coordinate point? -1 if none. Gutters are tested right to left, and the fill column's own divider is never reported. |
-| `CColumnHeader_GetPadding( h ) as integer` | The caption inset, in pixels. Read it from your paint callback. |
-| `CColumnHeader_SetPadding( h, nPadding )` | Sets it, in **raw pixels** — scale it yourself. Negatives become 0. Repaints, but never re-lays out: padding is paint-side only. |
-| `CColumnHeader_SetXOffset( h, xOffset )` | Shifts the whole column run left by this many pixels; every rect follows. Negatives become 0, and setting the value it already has does nothing. Defaults to 0 and nothing moves it for you. |
+| `PsColumnHeader_GetColumnWidth( h, idx ) as integer` | The column's width in pixels, already raised to its effective minimum. For the **fill** column this is the laid-out width, forcing a pending layout first. 0 for an invalid index. |
+| `PsColumnHeader_SetColumnWidth( h, idx, nWidth ) as boolean` | Stores the width, clamped up to the column's effective minimum, then re-lays out and repaints. **Silent** — no `WidthChanged` callback. FALSE for an invalid index. Called on a column whose divider is being dragged at that moment, the new value becomes the drag's base: a later ESC restores to it, and the drag resumes from it re-anchored to the current cursor position. |
+| `PsColumnHeader_GetColumnMinWidth( h, idx ) as integer` | The column's **own stored** minimum. 0 means "use the control default". |
+| `PsColumnHeader_SetColumnMinWidth( h, idx, nMinWidth ) as boolean` | Sets it; negatives become 0. Re-lays out and repaints. Does not rewrite a smaller stored width — the clamp is applied at layout and read time. FALSE for an invalid index. |
+| `PsColumnHeader_GetFillColumn( h ) as integer` | The **resolved** index of the fill column, or -1 for none. |
+| `PsColumnHeader_SetFillColumn( h, idx ) as boolean` | Takes a column index, `CCOLHDR_FILL_LAST` or `CCOLHDR_FILL_NONE`. FALSE for an index that is neither valid nor one of those two constants. |
+| `PsColumnHeader_GetColumnRect( h, idx, byref rc ) as boolean` | The column's rect in client coordinates. Forces any pending layout, so the result is always current — an embedding host reads its row-cell x-coordinates from here. Returns FALSE and empties `rc` for an invalid index. |
+| `PsColumnHeader_HitTestDivider( h, x, y ) as integer` | Which column's right-edge divider gutter contains this client-coordinate point? -1 if none. Gutters are tested right to left, and the fill column's own divider is never reported. |
+| `PsColumnHeader_GetPadding( h ) as integer` | The caption inset, in pixels. Read it from your paint callback. |
+| `PsColumnHeader_SetPadding( h, nPadding )` | Sets it, in **raw pixels** — scale it yourself. Negatives become 0. Repaints, but never re-lays out: padding is paint-side only. |
+| `PsColumnHeader_SetXOffset( h, xOffset )` | Shifts the whole column run left by this many pixels; every rect follows. Negatives become 0, and setting the value it already has does nothing. Defaults to 0 and nothing moves it for you. |
 
 ### Appearance
 
 | Function | Description |
 |---|---|
-| `CColumnHeader_GetBackColor( h ) as COLORREF` | The band's flat background colour. |
-| `CColumnHeader_SetBackColor( h, clr ) as COLORREF` | Sets it, repaints, and returns the previous value. |
-| `CColumnHeader_GetFont( h ) as HFONT` | The font stored for the band. |
-| `CColumnHeader_SetFont( h, hFont ) as boolean` | Sets it and repaints. **Borrowed, never owned** — keep it alive and destroy it yourself. It does not drive layout, and your painter is free to select a different font per column. |
-| `CColumnHeader_GetTooltipHandle( h ) as HWND` | The control's tooltip window, for direct `TTM_*` messages. |
-| `CColumnHeader_SetHoverTime( h, milliseconds )` | How long the cursor must rest on a column before `WM_MOUSEHOVER` and the tooltip. Default 250. |
+| `PsColumnHeader_GetBackColor( h ) as COLORREF` | The band's flat background colour. |
+| `PsColumnHeader_SetBackColor( h, clr ) as COLORREF` | Sets it, repaints, and returns the previous value. |
+| `PsColumnHeader_GetFont( h ) as HFONT` | The font stored for the band. |
+| `PsColumnHeader_SetFont( h, hFont ) as boolean` | Sets it and repaints. **Borrowed, never owned** — keep it alive and destroy it yourself. It does not drive layout, and your painter is free to select a different font per column. |
+| `PsColumnHeader_GetTooltipHandle( h ) as HWND` | The control's tooltip window, for direct `TTM_*` messages. |
+| `PsColumnHeader_SetHoverTime( h, milliseconds )` | How long the cursor must rest on a column before `WM_MOUSEHOVER` and the tooltip. Default 250. |
 
 ### Callback registration
 
 | Function | Description |
 |---|---|
-| `CColumnHeader_SetPaintCallback( h, usersub )` | Installs the per-column painter and repaints. **Required** — without it only the background is drawn. |
-| `CColumnHeader_SetMessageCallback( h, userfunc )` | Installs an observer for the mouse messages. |
-| `CColumnHeader_SetTooltipCallback( h, userfunc )` | Installs the on-demand tooltip text supplier. Unset, the column's caption is used. |
-| `CColumnHeader_SetClickCallback( h, usersub )` | Installs the completed-click-on-a-column-body handler — the sorting hook. |
-| `CColumnHeader_SetWidthChangedCallback( h, usersub )` | Installs the user-resize handler. **Not for a header embedded in a CListBox** — that slot belongs to the list; use `CListBox_SetColumnResizeCallback`. |
-| `CColumnHeader_SetAutoSizeCallback( h, userfunc )` | Installs the divider-double-click best-fit measurer. |
+| `PsColumnHeader_SetPaintCallback( h, usersub )` | Installs the per-column painter and repaints. **Required** — without it only the background is drawn. |
+| `PsColumnHeader_SetMessageCallback( h, userfunc )` | Installs an observer for the mouse messages. |
+| `PsColumnHeader_SetTooltipCallback( h, userfunc )` | Installs the on-demand tooltip text supplier. Unset, the column's caption is used. |
+| `PsColumnHeader_SetClickCallback( h, usersub )` | Installs the completed-click-on-a-column-body handler — the sorting hook. |
+| `PsColumnHeader_SetWidthChangedCallback( h, usersub )` | Installs the user-resize handler. **Not for a header embedded in a PsListBox** — that slot belongs to the list; use `PsListBox_SetColumnResizeCallback`. |
+| `PsColumnHeader_SetAutoSizeCallback( h, userfunc )` | Installs the divider-double-click best-fit measurer. |
 
 Passing 0 to any callback setter clears it.
 
@@ -461,7 +461,7 @@ every column cell is yours, drawn from whatever palette your host already has.
 
 | Setting | Paints |
 |---|---|
-| `CColumnHeader_SetBackColor` | The whole client band, filled before any column callback runs. It therefore also covers any strip no column owns, which is what the far right of the band looks like when the fill designation is `CCOLHDR_FILL_NONE`. It is the only thing painted when no paint callback is set |
+| `PsColumnHeader_SetBackColor` | The whole client band, filled before any column callback runs. It therefore also covers any strip no column owns, which is what the far right of the band looks like when the fill designation is `CCOLHDR_FILL_NONE`. It is the only thing painted when no paint callback is set |
 
 ### Which colour wins
 
@@ -505,22 +505,22 @@ All six typedefs carry the `HDR_` prefix.
 ### Paint
 
 ```freebasic
-type HDR_PaintCallbackSub as sub( byval p as CCOLUMNHEADER_PAINTINFO ptr )
+type HDR_PaintCallbackSub as sub( byval p as PSCOLUMNHEADER_PAINTINFO ptr )
 ```
 
 Draws one column's header cell. Called for each column touched by the repaint, so keep it
 cheap. Paint through `p->b` — the control's buffer for this repaint — using `p->rc` as the cell
 rect, and never touch a screen DC. The control has already filled the band with `BackColor`.
 
-Inset your caption by `CColumnHeader_GetPadding( p->hHeader )`.
+Inset your caption by `PsColumnHeader_GetPadding( p->hHeader )`.
 
-`CCOLUMNHEADER_PAINTINFO`:
+`PSCOLUMNHEADER_PAINTINFO`:
 
 | Field | Meaning |
 |---|---|
 | `hHeader` | The control, so the callback can query it |
 | `itemID` | The column index |
-| `b` | The control's `CBufferPaint` for this repaint (borrowed, not owned) |
+| `b` | The control's `PsBufferPaint` for this repaint (borrowed, not owned) |
 | `rc` | This column's rect, in client coordinates |
 | `isHot` | The mouse is over this column's **body** |
 | `isPressed` | A live left press on this column's body |
@@ -535,13 +535,13 @@ Inset your caption by `CColumnHeader_GetPadding( p->hHeader )`.
 ### Message
 
 ```freebasic
-type HDR_MessageCallbackFunc as function( byval m as CCOLUMNHEADER_MESSAGEINFO ptr ) as boolean
+type HDR_MessageCallbackFunc as function( byval m as PSCOLUMNHEADER_MESSAGEINFO ptr ) as boolean
 ```
 
 Observes mouse messages. Return TRUE to suppress the control's own handling of that message,
 FALSE to let it proceed.
 
-`CCOLUMNHEADER_MESSAGEINFO`:
+`PSCOLUMNHEADER_MESSAGEINFO`:
 
 | Field | Meaning |
 |---|---|
@@ -586,7 +586,7 @@ type HDR_ClickCallbackSub as sub( byval hHeader as HWND, byval idx as integer )
 
 A completed click on a column's **body** — pressed and released on the same column, and not on
 a divider. This is the sorting hook: the control never sorts, so reorder your own data, repaint
-a sort glyph from your paint callback, and call `CColumnHeader_Refresh`.
+a sort glyph from your paint callback, and call `PsColumnHeader_Refresh`.
 
 Press, slide off, release fires nothing. A rapid double-click on a body fires it **twice**.
 
@@ -610,10 +610,10 @@ So a drag always ends with exactly one `bLive = false` notification, whether it 
 cancelled, and that final value is the truth. A host that consumed the live updates converges
 back on a cancel for free.
 
-`CColumnHeader_SetColumnWidth` does **not** fire this — programmatic setters are silent, which
+`PsColumnHeader_SetColumnWidth` does **not** fire this — programmatic setters are silent, which
 is what makes it safe to call from inside this handler.
 
-**Embedded in a CListBox, subscribe with `CListBox_SetColumnResizeCallback` instead.**
+**Embedded in a PsListBox, subscribe with `PsListBox_SetColumnResizeCallback` instead.**
 
 ### Auto size
 
@@ -634,7 +634,7 @@ With no auto-size callback installed, a divider double-click does nothing.
 
 ## Constants
 
-Defined in `CColumnHeader.bi`:
+Defined in `PsColumnHeader.bi`:
 
 | Constant | Value | Meaning |
 |---|---:|---|
@@ -666,19 +666,19 @@ And the control itself:
 
 ## Related controls
 
-`CColumnHeader` creates nothing and embeds nothing. It is, however, embedded by
-**[CListBox](README.md)**, which places one above its rows and uses it as the single store for
-its column model — every `CListBox_*Column*` function delegates here.
+`PsColumnHeader` creates nothing and embeds nothing. It is, however, embedded by
+**[PsListBox](README.md)**, which places one above its rows and uses it as the single store for
+its column model — every `PsListBox_*Column*` function delegates here.
 
-If your header is a CListBox's, three rules apply:
+If your header is a PsListBox's, three rules apply:
 
 | Do | Instead of |
 |---|---|
-| Define columns with `CListBox_AddColumn` and friends | `CColumnHeader_AddColumn` on the child |
-| Subscribe to resizes with `CListBox_SetColumnResizeCallback` | `CColumnHeader_SetWidthChangedCallback` — that slot is the list's, and it needs it to repaint rows on every live drag |
-| Size the band with `CListBox_SetHeaderHeight` and show it with `CListBox_ShowHeader` | `SetWindowPos` / `ShowWindow` on the child, which the list re-lays out anyway |
+| Define columns with `PsListBox_AddColumn` and friends | `PsColumnHeader_AddColumn` on the child |
+| Subscribe to resizes with `PsListBox_SetColumnResizeCallback` | `PsColumnHeader_SetWidthChangedCallback` — that slot is the list's, and it needs it to repaint rows on every live drag |
+| Size the band with `PsListBox_SetHeaderHeight` and show it with `PsListBox_ShowHeader` | `SetWindowPos` / `ShowWindow` on the child, which the list re-lays out anyway |
 
 Everything else — padding, back colour, font, the paint, click, auto-size and tooltip
 callbacks, `GetColumnRect`, `HitTestDivider` — is safe to call directly on the handle from
-`CListBox_GetHeader`, and several of those have `CListBox_*` pass-through wrappers for
+`PsListBox_GetHeader`, and several of those have `PsListBox_*` pass-through wrappers for
 convenience.

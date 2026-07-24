@@ -1,10 +1,10 @@
 '    Owner-drawn column header control
 '
-'    A self-contained, per-instance header band in the same vein as CStatusBar and
-'    CVScrollBar: it owns its own window class and keeps all state per instance in the
+'    A self-contained, per-instance header band in the same vein as PsStatusBar and
+'    PsVScrollBar: it owns its own window class and keeps all state per instance in the
 '    CWindow UserData area, so any number of instances can coexist. It is generic -- it
-'    knows nothing about listboxes. CListBox embeds one above its rows (the way it embeds
-'    a CVScrollBar on its right edge), but the control works standalone.
+'    knows nothing about listboxes. PsListBox embeds one above its rows (the way it embeds
+'    a PsVScrollBar on its right edge), but the control works standalone.
 '
 '    The control owns the column model (text, widths) and the derived geometry; all
 '    rendering is the host's, via a per-column paint callback. Column widths are stored
@@ -14,7 +14,7 @@
 
 #pragma once
 
-#include once "CBufferPaint.bi"
+#include once "PsBufferPaint.bi"
 
 ' Polling timer that guarantees hot-tracking is cleared when the mouse leaves the
 ' control. WM_MOUSELEAVE (TME_LEAVE) is not reliably delivered on fast exits, so a
@@ -24,8 +24,8 @@
 #define CCOLHDR_HOTTRACK_MS     100
 
 ' Default horizontal inset for a column's caption. The control DPI-scales this at
-' Create; CColumnHeader_SetPadding takes raw pixels thereafter. Padding is paint-side
-' only here (unlike CStatusBar, widths are stored, not measured from text).
+' Create; PsColumnHeader_SetPadding takes raw pixels thereafter. Padding is paint-side
+' only here (unlike PsStatusBar, widths are stored, not measured from text).
 #define CCOLHDR_DEFAULT_PADDING 8
 
 ' Half-width of the divider hit zone: a boundary is grabbable within +/- this many
@@ -36,7 +36,7 @@
 ' can never be dragged or laid out narrower than its effective minimum.
 #define CCOLHDR_DEFAULT_MINWIDTH 16
 
-' Fill-column designations for CColumnHeader_SetFillColumn (besides an explicit index).
+' Fill-column designations for PsColumnHeader_SetFillColumn (besides an explicit index).
 ' The fill column absorbs whatever client width the fixed columns leave over -- it
 ' shrinks and grows with the window (never below its minimum width). Default is
 ' FILL_LAST: with a single column the cell spans the full width, and there is no dead
@@ -48,7 +48,7 @@
 ' errors that never name the real problem -- hence nMinWidth / nWidth throughout.
 ' NOTE: no isHot here. Hover is transient and single-valued, so the control's
 ' nLastHotIdx / nHotDividerIdx are the one source of truth.
-type CCOLUMNHEADER_COLINFO
+type PSCOLUMNHEADER_COLINFO
     Text      as DWSTRING
     itemData  as integer
     nWidth    as integer = 100   ' stored width in PIXELS; the fill column's is derived
@@ -56,10 +56,10 @@ type CCOLUMNHEADER_COLINFO
     rc        as RECT            ' computed client coordinates (see LayoutColumns)
 end type
 
-type CCOLUMNHEADER_PAINTINFO
+type PSCOLUMNHEADER_PAINTINFO
     hHeader     as HWND                   ' the control, so the callback can query it
     itemID      as integer                ' column index
-    b           as CBufferPaint ptr    ' the control's buffer for this repaint (no copy)
+    b           as PsBufferPaint ptr    ' the control's buffer for this repaint (no copy)
     rc          as RECT                   ' this column's rect, in client coordinates
     isHot       as boolean                ' mouse is over this column's body
     isPressed   as boolean                ' live left press on this column's body
@@ -69,7 +69,7 @@ type CCOLUMNHEADER_PAINTINFO
     wszCaption  as DWSTRING               ' the column's Text
 end type
 
-type CCOLUMNHEADER_MESSAGEINFO
+type PSCOLUMNHEADER_MESSAGEINFO
     hHeader as HWND
     uMsg    as UINT
     wParam  as WPARAM
@@ -80,15 +80,15 @@ end type
 ' Draw one column's header cell. Called for each column touched by the repaint; keep it
 ' cheap. Paint through p->b using p->rc as the cell rect -- do not touch the screen DC.
 ' Style from the state flags; the control decides them, you only render. Inset your
-' caption by CColumnHeader_GetPadding( p->hHeader ). Nothing but the control's flat
+' caption by PsColumnHeader_GetPadding( p->hHeader ). Nothing but the control's flat
 ' BackColor is drawn if no paint callback is set.
-type HDR_PaintCallbackSub as sub( byval p as CCOLUMNHEADER_PAINTINFO ptr )
+type HDR_PaintCallbackSub as sub( byval p as PSCOLUMNHEADER_PAINTINFO ptr )
 
 ' Observe mouse messages. Return TRUE if you handled it and want the control's default
 ' handling suppressed, FALSE to let it proceed. The result is IGNORED for WM_LBUTTONUP:
 ' the control holds mouse capture across a press, and the up-message is the capture's
 ' exit -- a callback that suppressed it would strand the capture (see Learnings.md).
-type HDR_MessageCallbackFunc as function( byval m as CCOLUMNHEADER_MESSAGEINFO ptr ) as boolean
+type HDR_MessageCallbackFunc as function( byval m as PSCOLUMNHEADER_MESSAGEINFO ptr ) as boolean
 
 ' Supply the tooltip text for a column, on demand (only when a tip is about to show).
 ' Return "" for no tooltip. If unset, the column's own Text is used.
@@ -102,7 +102,7 @@ type HDR_ClickCallbackSub as sub( byval hHeader as HWND, byval idx as integer )
 ' A column's width changed through USER interaction. Fired per WM_MOUSEMOVE during a
 ' live divider drag with bLive = true, and once more with bLive = false when the drag
 ' commits (release), cancels (ESC / capture loss -- carrying the restored width), or an
-' autosize applies. Programmatic CColumnHeader_SetColumnWidth does NOT fire this (the
+' autosize applies. Programmatic PsColumnHeader_SetColumnWidth does NOT fire this (the
 ' family rule: programmatic setters are silent; only user interaction notifies).
 type HDR_WidthChangedCallbackSub as sub( byval hHeader as HWND, byval idx as integer, byval nWidth as integer, byval bLive as boolean )
 
@@ -110,11 +110,11 @@ type HDR_WidthChangedCallbackSub as sub( byval hHeader as HWND, byval idx as int
 ' owns the cell data and fonts, so only it can measure). Return <= 0 for "no change".
 type HDR_AutoSizeCallbackFunc as function( byval hHeader as HWND, byval idx as integer ) as integer
 
-type CCOLUMNHEADER
+type PSCOLUMNHEADER
     hWin              as HWND
     hToolTip          as HWND
     wszTooltip        as DWSTRING     ' instance-lifetime buffer TTN_GETDISPINFOW points at
-    cols(any)         as CCOLUMNHEADER_COLINFO
+    cols(any)         as PSCOLUMNHEADER_COLINFO
     colCount          as integer = 0
     HoverTime         as integer = 250
     nLastHotIdx       as integer = -1     ' column body the mouse was last over
@@ -125,14 +125,14 @@ type CCOLUMNHEADER
     ' shadow the TYPE name HFONT inside every member procedure (see Learnings.md).
     hHeaderFont       as HFONT
     ' Fill designation: CCOLHDR_FILL_LAST (default) / CCOLHDR_FILL_NONE / explicit index.
-    ' A stored index gets the same insert/delete fixups as CStatusBar's spring panel.
+    ' A stored index gets the same insert/delete fixups as PsStatusBar's spring panel.
     fillCol           as integer = CCOLHDR_FILL_LAST
     ' Future horizontal scroll: every rect is computed at (runningX - xOffset). Always 0
-    ' in v1; a CHScrollBar can drive it later without any contract change.
+    ' in v1; a PsHScrollBar can drive it later without any contract change.
     xOffset           as integer = 0
     nPadding          as integer = CCOLHDR_DEFAULT_PADDING   ' DPI-scaled at Create
     bLayoutDirty      as boolean = true
-    ' --- Press / divider-drag state (mouse capture; CTabBar discipline). The control
+    ' --- Press / divider-drag state (mouse capture; PsTabBar discipline). The control
     '     takes capture on WM_LBUTTONDOWN because both gestures here consume the
     '     guaranteed down->up pairing: the drag obviously, and the body click's
     '     "press, slide off, release -> nothing" cancel semantics. ---
@@ -152,9 +152,9 @@ type CCOLUMNHEADER
     declare function EffectiveFillCol() as integer
     declare function EffectiveMinWidth( byval idx as integer ) as integer
     declare function GetCount() as integer
-    declare function InsertColumnAt( byval idx as integer ) as CCOLUMNHEADER_COLINFO ptr
-    declare function AddColumn() as CCOLUMNHEADER_COLINFO ptr
-    declare function GetColumn( byval idx as integer ) as CCOLUMNHEADER_COLINFO ptr
+    declare function InsertColumnAt( byval idx as integer ) as PSCOLUMNHEADER_COLINFO ptr
+    declare function AddColumn() as PSCOLUMNHEADER_COLINFO ptr
+    declare function GetColumn( byval idx as integer ) as PSCOLUMNHEADER_COLINFO ptr
     declare function DeleteColumnAt( byval idx as integer ) as boolean
     declare function IsValidColumn( byval idx as integer ) as boolean
     declare function HitTestColumn( byval x as integer, byval y as integer ) as integer
@@ -166,7 +166,7 @@ end type
 
 ' Which column is the (effective) fill column right now? Resolves the FILL_LAST
 ' designation against the current count. -1 = none.
-function CCOLUMNHEADER.EffectiveFillCol() as integer
+function PSCOLUMNHEADER.EffectiveFillCol() as integer
     if this.fillCol = CCOLHDR_FILL_NONE then return -1
     if this.fillCol = CCOLHDR_FILL_LAST then
         if this.colCount > 0 then return this.colCount - 1
@@ -178,7 +178,7 @@ end function
 
 ' The floor a column can never be laid out or dragged below: its own nMinWidth, or the
 ' DPI-scaled control default when that is 0.
-function CCOLUMNHEADER.EffectiveMinWidth( byval idx as integer ) as integer
+function PSCOLUMNHEADER.EffectiveMinWidth( byval idx as integer ) as integer
     dim as integer minW = 0
     if this.IsValidColumn( idx ) then minW = this.cols(idx).nMinWidth
     if minW <= 0 then
@@ -193,11 +193,11 @@ end function
 ' everything else (hit-testing, painting, invalidation, an embedding host's row cells)
 ' consumes it. Widths are stored, not measured: each fixed column gets
 ' max( nWidth, EffectiveMinWidth ), and the fill column absorbs the leftover client
-' width -- shrinking as well as growing (unlike CStatusBar's grow-only spring), because
+' width -- shrinking as well as growing (unlike PsStatusBar's grow-only spring), because
 ' a fill column must track the window both ways -- but never below its own minimum.
 ' On overflow the rects run honestly past the right edge; clipping is the paint pass's
 ' job, and the cursor cannot reach past the edge, so hit-testing stays correct for free.
-sub CCOLUMNHEADER.LayoutColumns()
+sub PSCOLUMNHEADER.LayoutColumns()
     this.bLayoutDirty = false
     if this.hWin = 0 then exit sub
     if this.colCount = 0 then exit sub
@@ -241,22 +241,22 @@ sub CCOLUMNHEADER.LayoutColumns()
     next
 end sub
 
-function CCOLUMNHEADER.GetCount() as integer
+function PSCOLUMNHEADER.GetCount() as integer
     return this.colCount
 end function
 
-function CCOLUMNHEADER.IsValidColumn( byval idx as integer ) as boolean
+function PSCOLUMNHEADER.IsValidColumn( byval idx as integer ) as boolean
     return (idx >= 0) andalso (idx < this.colCount)
 end function
 
-function CCOLUMNHEADER.GetColumn( byval idx as integer ) as CCOLUMNHEADER_COLINFO ptr
+function PSCOLUMNHEADER.GetColumn( byval idx as integer ) as PSCOLUMNHEADER_COLINFO ptr
     if this.IsValidColumn(idx) = false then return 0
     return @this.cols(idx)
 end function
 
 ' Insert a fresh (reset) column at idx, shifting later columns up. Grows the backing
 ' store by doubling so bulk inserts are amortized O(1), not O(n^2).
-function CCOLUMNHEADER.InsertColumnAt( byval idx as integer ) as CCOLUMNHEADER_COLINFO ptr
+function PSCOLUMNHEADER.InsertColumnAt( byval idx as integer ) as PSCOLUMNHEADER_COLINFO ptr
     if idx < 0 then idx = 0
     if idx > this.colCount then idx = this.colCount
 
@@ -294,11 +294,11 @@ function CCOLUMNHEADER.InsertColumnAt( byval idx as integer ) as CCOLUMNHEADER_C
     return @this.cols(idx)
 end function
 
-function CCOLUMNHEADER.AddColumn() as CCOLUMNHEADER_COLINFO ptr
+function PSCOLUMNHEADER.AddColumn() as PSCOLUMNHEADER_COLINFO ptr
     return this.InsertColumnAt( this.colCount )
 end function
 
-function CCOLUMNHEADER.DeleteColumnAt( byval idx as integer ) as boolean
+function PSCOLUMNHEADER.DeleteColumnAt( byval idx as integer ) as boolean
     if this.IsValidColumn(idx) = false then return false
     ' shift [idx+1 .. colCount-1] down by one
     for i as integer = idx to this.colCount - 2
@@ -322,7 +322,7 @@ function CCOLUMNHEADER.DeleteColumnAt( byval idx as integer ) as boolean
     return true
 end function
 
-sub CCOLUMNHEADER.Clear()
+sub PSCOLUMNHEADER.Clear()
     for i as integer = 0 to this.colCount - 1
         this.cols(i).Text = ""
     next
@@ -339,7 +339,7 @@ end sub
 ' width and two boundaries nearly coincide, the later divider wins (matches listview
 ' feel). The effective fill column's own divider is NOT grabbable: its width is derived,
 ' and with no horizontal scroll there is nothing meaningful to drag it to.
-function CCOLUMNHEADER.HitTestDivider( byval x as integer, byval y as integer ) as integer
+function PSCOLUMNHEADER.HitTestDivider( byval x as integer, byval y as integer ) as integer
     if this.colCount = 0 then return -1
     if this.bLayoutDirty then this.LayoutColumns()
     dim as integer gutter = CCOLHDR_DIVIDER_GUTTER
@@ -356,7 +356,7 @@ end function
 
 ' Which column's BODY is (x, y) over? Divider gutters take priority: on a gutter this
 ' returns -1 (the gesture there is a resize, not a column press).
-function CCOLUMNHEADER.HitTestColumn( byval x as integer, byval y as integer ) as integer
+function PSCOLUMNHEADER.HitTestColumn( byval x as integer, byval y as integer ) as integer
     if this.colCount = 0 then return -1
     if this.bLayoutDirty then this.LayoutColumns()
     if this.HitTestDivider( x, y ) <> -1 then return -1
@@ -371,7 +371,7 @@ end function
 ' Abandon any live press or divider drag WITHOUT firing callbacks or restoring widths --
 ' this is the "state is gone" path (column mutated under a gesture, window destroyed).
 ' Interactive cancel/commit paths (up, ESC, WM_CAPTURECHANGED) have their own handlers.
-sub CCOLUMNHEADER.CancelPress()
+sub PSCOLUMNHEADER.CancelPress()
     this.nPressedIdx = -1
     this.nDragDividerIdx = -1
     this.bDragCancelled = false
@@ -380,7 +380,7 @@ end sub
 
 ' Mark the layout stale and request a repaint. Every mutator routes through here, which
 ' is what makes layout lazy: a burst of width changes costs one layout pass, not N.
-sub CCOLUMNHEADER.Refresh()
+sub PSCOLUMNHEADER.Refresh()
     this.bLayoutDirty = true
     ' Repaint WITH background erase so a region vacated by a shrinking column is cleared.
     if this.hWin then InvalidateRect( this.hWin, NULL, TRUE )
@@ -391,7 +391,7 @@ end sub
 ' PUBLIC API
 '
 ' THE CONTROL HANDLE
-'   Every CColumnHeader_* function takes the handle returned by CColumnHeader_Create().
+'   Every PsColumnHeader_* function takes the handle returned by PsColumnHeader_Create().
 '   The handle is a real HWND on purpose (not an opaque type): callers legitimately need
 '   to treat the control as a window, e.g. SetWindowPos() to place and size it.
 '
@@ -403,27 +403,27 @@ end sub
 '   CtrlID becomes the control window's id (GWLP_ID). There are no child controls.
 '   The control is created zero-sized: position it with SetWindowPos().
 ' ----------------------------------------------------------------------------------------
-declare function CColumnHeader_Create( byval hWndParent as HWND, byval CtrlID as integer ) as HWND
+declare function PsColumnHeader_Create( byval hWndParent as HWND, byval CtrlID as integer ) as HWND
 
 ' ----------------------------------------------------------------------------------------
 ' Adding / removing columns. Add returns the new column's index, Insert the actual index
 ' used (clamped to [0, count]); both -1 on failure. Widths are pixels. nMinWidth 0 means
 ' the scaled CCOLHDR_DEFAULT_MINWIDTH floor applies.
 ' ----------------------------------------------------------------------------------------
-declare function CColumnHeader_AddColumn( byval hHeader as HWND, byval Text as DWSTRING, byval nWidth as integer = 100, byval nMinWidth as integer = 0, byval itemData as integer = 0 ) as integer
-declare function CColumnHeader_InsertColumn( byval hHeader as HWND, byval idx as integer, byval Text as DWSTRING, byval nWidth as integer = 100, byval nMinWidth as integer = 0, byval itemData as integer = 0 ) as integer
-declare function CColumnHeader_DeleteColumn( byval hHeader as HWND, byval idx as integer ) as boolean
-declare sub      CColumnHeader_Clear( byval hHeader as HWND )
-declare function CColumnHeader_GetCount( byval hHeader as HWND ) as integer
-declare sub      CColumnHeader_Refresh( byval hHeader as HWND )
+declare function PsColumnHeader_AddColumn( byval hHeader as HWND, byval Text as DWSTRING, byval nWidth as integer = 100, byval nMinWidth as integer = 0, byval itemData as integer = 0 ) as integer
+declare function PsColumnHeader_InsertColumn( byval hHeader as HWND, byval idx as integer, byval Text as DWSTRING, byval nWidth as integer = 100, byval nMinWidth as integer = 0, byval itemData as integer = 0 ) as integer
+declare function PsColumnHeader_DeleteColumn( byval hHeader as HWND, byval idx as integer ) as boolean
+declare sub      PsColumnHeader_Clear( byval hHeader as HWND )
+declare function PsColumnHeader_GetCount( byval hHeader as HWND ) as integer
+declare sub      PsColumnHeader_Refresh( byval hHeader as HWND )
 
 ' ----------------------------------------------------------------------------------------
 ' Column contents. Set* return FALSE for an invalid column index.
 ' ----------------------------------------------------------------------------------------
-declare function CColumnHeader_GetColumnText( byval hHeader as HWND, byval idx as integer ) as DWSTRING
-declare function CColumnHeader_SetColumnText( byval hHeader as HWND, byval idx as integer, byval Text as DWSTRING ) as boolean
-declare function CColumnHeader_GetColumnItemData( byval hHeader as HWND, byval idx as integer ) as integer
-declare function CColumnHeader_SetColumnItemData( byval hHeader as HWND, byval idx as integer, byval itemData as integer ) as boolean
+declare function PsColumnHeader_GetColumnText( byval hHeader as HWND, byval idx as integer ) as DWSTRING
+declare function PsColumnHeader_SetColumnText( byval hHeader as HWND, byval idx as integer, byval Text as DWSTRING ) as boolean
+declare function PsColumnHeader_GetColumnItemData( byval hHeader as HWND, byval idx as integer ) as integer
+declare function PsColumnHeader_SetColumnItemData( byval hHeader as HWND, byval idx as integer, byval itemData as integer ) as boolean
 
 ' ----------------------------------------------------------------------------------------
 ' Layout.
@@ -443,27 +443,27 @@ declare function CColumnHeader_SetColumnItemData( byval hHeader as HWND, byval i
 '   HitTestDivider (client coords) is public mainly for self-tests: it returns the
 '   column whose right-edge divider gutter contains the point, -1 otherwise.
 ' ----------------------------------------------------------------------------------------
-declare function CColumnHeader_GetColumnWidth( byval hHeader as HWND, byval idx as integer ) as integer
-declare function CColumnHeader_SetColumnWidth( byval hHeader as HWND, byval idx as integer, byval nWidth as integer ) as boolean
-declare function CColumnHeader_GetColumnMinWidth( byval hHeader as HWND, byval idx as integer ) as integer
-declare function CColumnHeader_SetColumnMinWidth( byval hHeader as HWND, byval idx as integer, byval nMinWidth as integer ) as boolean
-declare function CColumnHeader_GetFillColumn( byval hHeader as HWND ) as integer
-declare function CColumnHeader_SetFillColumn( byval hHeader as HWND, byval idx as integer ) as boolean
-declare function CColumnHeader_GetColumnRect( byval hHeader as HWND, byval idx as integer, byref rc as RECT ) as boolean
-declare function CColumnHeader_HitTestDivider( byval hHeader as HWND, byval x as integer, byval y as integer ) as integer
-declare function CColumnHeader_GetPadding( byval hHeader as HWND ) as integer
-declare sub      CColumnHeader_SetPadding( byval hHeader as HWND, byval nPadding as integer )
-declare sub      CColumnHeader_SetXOffset( byval hHeader as HWND, byval xOffset as integer )
+declare function PsColumnHeader_GetColumnWidth( byval hHeader as HWND, byval idx as integer ) as integer
+declare function PsColumnHeader_SetColumnWidth( byval hHeader as HWND, byval idx as integer, byval nWidth as integer ) as boolean
+declare function PsColumnHeader_GetColumnMinWidth( byval hHeader as HWND, byval idx as integer ) as integer
+declare function PsColumnHeader_SetColumnMinWidth( byval hHeader as HWND, byval idx as integer, byval nMinWidth as integer ) as boolean
+declare function PsColumnHeader_GetFillColumn( byval hHeader as HWND ) as integer
+declare function PsColumnHeader_SetFillColumn( byval hHeader as HWND, byval idx as integer ) as boolean
+declare function PsColumnHeader_GetColumnRect( byval hHeader as HWND, byval idx as integer, byref rc as RECT ) as boolean
+declare function PsColumnHeader_HitTestDivider( byval hHeader as HWND, byval x as integer, byval y as integer ) as integer
+declare function PsColumnHeader_GetPadding( byval hHeader as HWND ) as integer
+declare sub      PsColumnHeader_SetPadding( byval hHeader as HWND, byval nPadding as integer )
+declare sub      PsColumnHeader_SetXOffset( byval hHeader as HWND, byval xOffset as integer )
 
 ' ----------------------------------------------------------------------------------------
 ' Appearance. The font is borrowed, never owned: keep it alive and destroy it yourself.
 ' ----------------------------------------------------------------------------------------
-declare function CColumnHeader_GetBackColor( byval hHeader as HWND ) as COLORREF
-declare function CColumnHeader_SetBackColor( byval hHeader as HWND, byval clr as COLORREF ) as COLORREF
-declare function CColumnHeader_GetFont( byval hHeader as HWND ) as HFONT
-declare function CColumnHeader_SetFont( byval hHeader as HWND, byval hFont as HFONT ) as boolean
-declare function CColumnHeader_GetTooltipHandle( byval hHeader as HWND ) as HWND
-declare sub      CColumnHeader_SetHoverTime( byval hHeader as HWND, byval milliseconds as integer )
+declare function PsColumnHeader_GetBackColor( byval hHeader as HWND ) as COLORREF
+declare function PsColumnHeader_SetBackColor( byval hHeader as HWND, byval clr as COLORREF ) as COLORREF
+declare function PsColumnHeader_GetFont( byval hHeader as HWND ) as HFONT
+declare function PsColumnHeader_SetFont( byval hHeader as HWND, byval hFont as HFONT ) as boolean
+declare function PsColumnHeader_GetTooltipHandle( byval hHeader as HWND ) as HWND
+declare sub      PsColumnHeader_SetHoverTime( byval hHeader as HWND, byval milliseconds as integer )
 
 ' ----------------------------------------------------------------------------------------
 ' Callbacks. See the type declarations above for each signature and contract.
@@ -475,9 +475,9 @@ declare sub      CColumnHeader_SetHoverTime( byval hHeader as HWND, byval millis
 '   WidthChangedCallback - user resize: live per move, final on commit/cancel/autosize.
 '   AutoSizeCallback     - divider double-click: return best-fit pixels, <= 0 = ignore.
 ' ----------------------------------------------------------------------------------------
-declare sub      CColumnHeader_SetPaintCallback( byval hHeader as HWND, byval usersub as HDR_PaintCallbackSub )
-declare sub      CColumnHeader_SetMessageCallback( byval hHeader as HWND, byval userfunc as HDR_MessageCallbackFunc )
-declare sub      CColumnHeader_SetTooltipCallback( byval hHeader as HWND, byval userfunc as HDR_TooltipCallbackFunc )
-declare sub      CColumnHeader_SetClickCallback( byval hHeader as HWND, byval usersub as HDR_ClickCallbackSub )
-declare sub      CColumnHeader_SetWidthChangedCallback( byval hHeader as HWND, byval usersub as HDR_WidthChangedCallbackSub )
-declare sub      CColumnHeader_SetAutoSizeCallback( byval hHeader as HWND, byval userfunc as HDR_AutoSizeCallbackFunc )
+declare sub      PsColumnHeader_SetPaintCallback( byval hHeader as HWND, byval usersub as HDR_PaintCallbackSub )
+declare sub      PsColumnHeader_SetMessageCallback( byval hHeader as HWND, byval userfunc as HDR_MessageCallbackFunc )
+declare sub      PsColumnHeader_SetTooltipCallback( byval hHeader as HWND, byval userfunc as HDR_TooltipCallbackFunc )
+declare sub      PsColumnHeader_SetClickCallback( byval hHeader as HWND, byval usersub as HDR_ClickCallbackSub )
+declare sub      PsColumnHeader_SetWidthChangedCallback( byval hHeader as HWND, byval usersub as HDR_WidthChangedCallbackSub )
+declare sub      PsColumnHeader_SetAutoSizeCallback( byval hHeader as HWND, byval userfunc as HDR_AutoSizeCallbackFunc )

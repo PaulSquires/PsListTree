@@ -1,7 +1,7 @@
 
 #pragma once
 
-#include once "CBufferPaint.bi"
+#include once "PsBufferPaint.bi"
 
 ' Polling timer that guarantees hot-tracking is cleared when the mouse leaves the
 ' control. WM_MOUSELEAVE (TME_LEAVE) is not reliably delivered on fast exits, so a
@@ -9,20 +9,20 @@
 ' instance can share this id. Value is deliberately unusual to avoid colliding with
 ' any timer the standard listbox uses internally.
 #define IDT_CLISTBOX_HOTTRACK   &hCB01
-#define CLISTBOX_HOTTRACK_MS    100
+#define PSLISTBOX_HOTTRACK_MS    100
 
 ' One cell of a multi-column row, as handed to the paint callback. The rect is in the
 ' row buffer's coordinate space (y spans 0..row height; x comes from the header's
-' column geometry, which maps 1:1 onto the row -- see CListBox_PositionWindows).
-type CLISTBOX_CELLINFO
+' column geometry, which maps 1:1 onto the row -- see PsListBox_PositionWindows).
+type PSLISTBOX_CELLINFO
     iCol            as integer
     rc              as RECT
     wszText         as DWSTRING
 end type
 
-type CLISTBOX_PAINTINFO
+type PSLISTBOX_PAINTINFO
     itemID          as integer                ' MODEL row index (not the visible/listbox index)
-    b               as CBufferPaint ptr    ' points to the caller's buffer (no copy)
+    b               as PsBufferPaint ptr    ' points to the caller's buffer (no copy)
     rc              as RECT
     isHot           as boolean                ' mouse is hovering this row
     isSelected      as boolean                ' row is part of the selection
@@ -38,10 +38,10 @@ type CLISTBOX_PAINTINFO
     '     your friend). The array is control-owned scratch, valid ONLY during the
     '     callback -- copy anything you need to keep. ---
     columnCount     as integer
-    cells           as CLISTBOX_CELLINFO ptr
+    cells           as PSLISTBOX_CELLINFO ptr
 end type
 
-type CLISTBOX_MESSAGEINFO
+type PSLISTBOX_MESSAGEINFO
     hList           as HWND
     uMsg            as UINT
     wParam          as WPARAM
@@ -52,7 +52,7 @@ type CLISTBOX_MESSAGEINFO
 end type
 
 
-type CLISTBOX_ROWINFO
+type PSLISTBOX_ROWINFO
     IsHeader        as boolean = false
     bCollapsed      as boolean = false
     selected        as boolean = false    ' selection is stored in the model, not the listbox
@@ -71,13 +71,13 @@ end type
 
 ' fbc cannot parse `redim rows(i).cells(...)` (a member array reached through an array
 ' element); a member procedure redim'ing `this.cells` parses fine -- see Learnings.md.
-sub CLISTBOX_ROWINFO.EnsureCells( byval n as integer )
+sub PSLISTBOX_ROWINFO.EnsureCells( byval n as integer )
     if n <= 0 then exit sub
     if ubound(this.cells) < n - 1 then redim preserve this.cells( 0 to n - 1 )
 end sub
 
 ' Shrink storage to exactly n cells; n <= 0 frees the array.
-sub CLISTBOX_ROWINFO.TrimCells( byval n as integer )
+sub PSLISTBOX_ROWINFO.TrimCells( byval n as integer )
     if n <= 0 then
         erase this.cells
     elseif ubound(this.cells) >= n then
@@ -89,13 +89,13 @@ end sub
 ' p->b (a per-control buffer that is already clipped and offset to this row), using p->rc
 ' as the row rect -- do not touch the screen DC. Style from the state flags; the control
 ' decides them, you only render. Nothing is drawn if no paint callback is set.
-type PaintCallbackSub as sub( byval p as CLISTBOX_PAINTINFO ptr )
+type PaintCallbackSub as sub( byval p as PSLISTBOX_PAINTINFO ptr )
 
 ' Observe mouse messages. Return TRUE if you handled it and want the default listbox
 ' handling suppressed, FALSE to let it proceed.
 ' CAUTION: for WM_LBUTTONUP the result is IGNORED and the default always runs -- the
 ' listbox releases its mouse capture there, and swallowing it strands the capture.
-type MessageCallbackFunc as function( byval m as CLISTBOX_MESSAGEINFO ptr ) as boolean
+type MessageCallbackFunc as function( byval m as PSLISTBOX_MESSAGEINFO ptr ) as boolean
 
 ' Supply the tooltip text for a MODEL row, on demand (only when a tip is about to show).
 ' Return "" for no tooltip. If unset, the row's own Text is used.
@@ -109,19 +109,19 @@ type TooltipCallbackFunc as function( byval hListControl as HWND, byval row as i
 ' reaches the message callback, so without this a host cannot tell that an arrow key moved
 ' the selection. Mouse-only hosts can keep using WM_LBUTTONUP in the message callback.
 '
-' NOT fired for CListBox_SetCurSel / SetSel / SelectAll / Clear: programmatic setters are
+' NOT fired for PsListBox_SetCurSel / SetSel / SelectAll / Clear: programmatic setters are
 ' silent (the family rule), so a host may call them from inside this callback without
 ' re-entering itself. Nor is it fired when the user re-selects the row that is already
 ' current -- only an actual change notifies.
 type SelChangeCallbackSub as sub( byval hListControl as HWND, byval row as integer )
 
-type CLISTBOX
+type PSLISTBOX
     hWin            as HWND
     hToolTip        as HWND
     wszTooltip      as DWSTRING
     ' --- Model: rows() is the backing store (capacity = ubound+1); rowCount is
     '     the number of logical rows and the single source of truth for "count". ---
-    rows(any)       as CLISTBOX_ROWINFO
+    rows(any)       as PSLISTBOX_ROWINFO
     rowCount        as integer = 0
     ' --- View: visibleMap(v) -> model row index, for v = 0..visibleCount-1.
     '     Rebuilt on any change / collapse-expand. ---
@@ -146,7 +146,7 @@ type CLISTBOX
     ' The first VISIBLE row on screen. topRow (model) stays the source of truth that
     ' survives a rebuild -- a collapsed group can move a model row to a different visible
     ' slot -- and this is what the paint loop and hit-testing actually walk. The two are
-    ' reconciled in CListBox_SyncViewFromModel, exactly where LB_SETTOPINDEX used to be.
+    ' reconciled in PsListBox_SyncViewFromModel, exactly where LB_SETTOPINDEX used to be.
     nTopVis         as integer = 0
     ' Row height in PIXELS, already DPI-scaled. RowHeight above is in unscaled units, the
     ' way every host sets it; this is the scaled value the geometry uses, computed once at
@@ -166,12 +166,12 @@ type CLISTBOX
     hScrollBar      as HWND
     ScrollBarWidth  as integer = CVSCROLL_DEFAULT_WIDTH   ' DPI-scaled when laid out
     scrollBarShown  as boolean = false
-    ' --- Optional column header band (CColumnHeader), created hidden and owned by this
+    ' --- Optional column header band (PsColumnHeader), created hidden and owned by this
     '     control. The embedded header instance is the SINGLE store for column
-    '     definitions and geometry -- CListBox keeps no column state; the CListBox_*
+    '     definitions and geometry -- PsListBox keeps no column state; the PsListBox_*
     '     column wrappers delegate, and OnDrawItem reads cell x-coordinates from the
     '     header's rects. The control owns the header's WidthChanged slot (an internal
-    '     chain hook); hosts use CListBox_SetColumnResizeCallback. ---
+    '     chain hook); hosts use PsListBox_SetColumnResizeCallback. ---
     hHeader         as HWND
     headerShown     as boolean = false
     HeaderHeight    as integer = 24       ' unscaled units (like RowHeight); ScaleY at layout
@@ -184,17 +184,17 @@ type CLISTBOX
     '     count changes (the paint loop is strictly sequential and single-threaded, so
     '     one array serves every row; the pointer handed out is valid only for the
     '     duration of each callback). ---
-    paintCells(any) as CLISTBOX_CELLINFO
+    paintCells(any) as PSLISTBOX_CELLINFO
 
     declare destructor()
     declare sub      EnsurePaintCells( byval n as integer )
     declare function GetCount() as integer                                  ' model row count
     declare function GetVisibleCount() as integer
-    declare function AddRow() as CLISTBOX_ROWINFO ptr                       ' append
-    declare function InsertRowAt( byval modelRow as integer ) as CLISTBOX_ROWINFO ptr
+    declare function AddRow() as PSLISTBOX_ROWINFO ptr                       ' append
+    declare function InsertRowAt( byval modelRow as integer ) as PSLISTBOX_ROWINFO ptr
     declare function DeleteRowAt( byval modelRow as integer ) as boolean
     declare sub      Clear()
-    declare function GetRow( byval row as integer ) as CLISTBOX_ROWINFO ptr
+    declare function GetRow( byval row as integer ) as PSLISTBOX_ROWINFO ptr
     declare function IsValidRow( byval row as integer ) as boolean
     declare function ModelToVisible( byval modelRow as integer ) as integer ' -1 if hidden/invalid
     declare function VisibleToModel( byval visRow as integer ) as integer   ' -1 if invalid
@@ -211,25 +211,25 @@ type CLISTBOX
     declare sub      Refresh()
 end type
 
-' Defined in CListBox.inc, but CLISTBOX.Refresh (below) has to call it -- push the
+' Defined in PsListBox.inc, but PSLISTBOX.Refresh (below) has to call it -- push the
 ' scrollbar's range/visibility to match the current model + scroll position.
-declare sub      CListBox_SyncScrollBar( byval pList as CLISTBOX ptr )
-declare sub      CListBox_SyncViewFromModel( byval pList as CLISTBOX ptr )
-declare sub      CListBox_CaptureTopRow( byval pList as CLISTBOX ptr )
-declare function CListBox_ItemsPerPage( byval pList as CLISTBOX ptr ) as integer
-declare function CListBox_PositionWindows( byval hwnd as HWND ) as LRESULT
+declare sub      PsListBox_SyncScrollBar( byval pList as PSLISTBOX ptr )
+declare sub      PsListBox_SyncViewFromModel( byval pList as PSLISTBOX ptr )
+declare sub      PsListBox_CaptureTopRow( byval pList as PSLISTBOX ptr )
+declare function PsListBox_ItemsPerPage( byval pList as PSLISTBOX ptr ) as integer
+declare function PsListBox_PositionWindows( byval hwnd as HWND ) as LRESULT
 
 ' The one-row back buffer (EnsureCache / FreeCache and its five fields) is GONE. It existed
 ' solely so WM_DRAWITEM would not create and destroy a compatible DC and bitmap for every
 ' row on every repaint. With the whole surface painted in a single buffer there is no
 ' per-row buffer to cache, and its disappearance is a good part of why the rewrite made
 ' the GDI and GDI+ backends faster too.
-destructor CLISTBOX()
+destructor PSLISTBOX()
 end destructor
 
 ' Size the PAINTINFO.cells scratch to exactly n entries (only re-dims when the column
 ' count actually changed, so the per-row cost is a compare).
-sub CLISTBOX.EnsurePaintCells( byval n as integer )
+sub PSLISTBOX.EnsurePaintCells( byval n as integer )
     if n <= 0 then
         erase this.paintCells
     elseif ubound(this.paintCells) + 1 <> n then
@@ -237,26 +237,26 @@ sub CLISTBOX.EnsurePaintCells( byval n as integer )
     end if
 end sub
 
-function CLISTBOX.GetCount() as integer
+function PSLISTBOX.GetCount() as integer
     return this.rowCount
 end function
 
-function CLISTBOX.GetVisibleCount() as integer
+function PSLISTBOX.GetVisibleCount() as integer
     return this.visibleCount
 end function
 
-function CLISTBOX.IsValidRow( byval row as integer ) as boolean
+function PSLISTBOX.IsValidRow( byval row as integer ) as boolean
     return (row >= 0) andalso (row < this.rowCount)
 end function
 
-function CLISTBOX.GetRow( byval row as integer ) as CLISTBOX_ROWINFO ptr
+function PSLISTBOX.GetRow( byval row as integer ) as PSLISTBOX_ROWINFO ptr
     if this.IsValidRow(row) = false then return null
     return @this.rows(row)
 end function
 
 ' Insert a fresh (reset) row at modelRow, shifting later rows up. Grows the
 ' backing store by doubling so bulk inserts are amortized O(1), not O(n^2).
-function CLISTBOX.InsertRowAt( byval modelRow as integer ) as CLISTBOX_ROWINFO ptr
+function PSLISTBOX.InsertRowAt( byval modelRow as integer ) as PSLISTBOX_ROWINFO ptr
     if modelRow < 0 then modelRow = 0
     if modelRow > this.rowCount then modelRow = this.rowCount
 
@@ -289,11 +289,11 @@ function CLISTBOX.InsertRowAt( byval modelRow as integer ) as CLISTBOX_ROWINFO p
     return @this.rows(modelRow)
 end function
 
-function CLISTBOX.AddRow() as CLISTBOX_ROWINFO ptr
+function PSLISTBOX.AddRow() as PSLISTBOX_ROWINFO ptr
     return this.InsertRowAt( this.rowCount )
 end function
 
-function CLISTBOX.DeleteRowAt( byval modelRow as integer ) as boolean
+function PSLISTBOX.DeleteRowAt( byval modelRow as integer ) as boolean
     if this.IsValidRow(modelRow) = false then return false
     ' shift [modelRow+1 .. rowCount-1] down by one
     for i as integer = modelRow to this.rowCount - 2
@@ -306,7 +306,7 @@ function CLISTBOX.DeleteRowAt( byval modelRow as integer ) as boolean
     return true
 end function
 
-sub CLISTBOX.Clear()
+sub PSLISTBOX.Clear()
     for i as integer = 0 to this.rowCount - 1
         this.rows(i).Text = ""
         this.rows(i).TrimCells( 0 )
@@ -325,9 +325,9 @@ end sub
 
 ' Rebuild the visible map from the model (flat, one-level grouping: an item is
 ' hidden iff its nearest preceding header is collapsed). Pure model: pushing the
-' new count into the Win32 listbox is CListBox_SyncListboxFromModel's job, because
+' new count into the Win32 listbox is PsListBox_SyncListboxFromModel's job, because
 ' LB_SETCOUNT resets the listbox's scroll and caret and the sync re-derives both.
-sub CLISTBOX.RebuildVisibleMap()
+sub PSLISTBOX.RebuildVisibleMap()
     this.visibleCount = 0
     if this.rowCount > 0 then
         redim this.visibleMap( 0 to this.rowCount - 1 )
@@ -347,41 +347,41 @@ sub CLISTBOX.RebuildVisibleMap()
     end if
 end sub
 
-function CLISTBOX.ModelToVisible( byval modelRow as integer ) as integer
+function PSLISTBOX.ModelToVisible( byval modelRow as integer ) as integer
     for v as integer = 0 to this.visibleCount - 1
         if this.visibleMap(v) = modelRow then return v
     next
     return -1
 end function
 
-function CLISTBOX.VisibleToModel( byval visRow as integer ) as integer
+function PSLISTBOX.VisibleToModel( byval visRow as integer ) as integer
     if (visRow < 0) orelse (visRow >= this.visibleCount) then return -1
     return this.visibleMap(visRow)
 end function
 
 ' --- Selection is stored per-row in the model, so it survives collapse/expand
 '     index shifts and can include hidden rows and headers. ---
-function CLISTBOX.IsRowSelected( byval modelRow as integer ) as boolean
+function PSLISTBOX.IsRowSelected( byval modelRow as integer ) as boolean
     if this.IsValidRow(modelRow) = false then return false
     return this.rows(modelRow).selected
 end function
 
-sub CLISTBOX.SetRowSelected( byval modelRow as integer, byval state as boolean )
+sub PSLISTBOX.SetRowSelected( byval modelRow as integer, byval state as boolean )
     if this.IsValidRow(modelRow) then this.rows(modelRow).selected = state
 end sub
 
-sub CLISTBOX.ClearSelection()
+sub PSLISTBOX.ClearSelection()
     for i as integer = 0 to this.rowCount - 1
         this.rows(i).selected = false
     next
 end sub
 
-sub CLISTBOX.SelectOnly( byval modelRow as integer )
+sub PSLISTBOX.SelectOnly( byval modelRow as integer )
     this.ClearSelection()
     if this.IsValidRow(modelRow) then this.rows(modelRow).selected = true
 end sub
 
-sub CLISTBOX.SelectRange( byval a as integer, byval b as integer )
+sub PSLISTBOX.SelectRange( byval a as integer, byval b as integer )
     if a > b then swap a, b
     if a < 0 then a = 0
     if b > this.rowCount - 1 then b = this.rowCount - 1
@@ -390,7 +390,7 @@ sub CLISTBOX.SelectRange( byval a as integer, byval b as integer )
     next
 end sub
 
-function CLISTBOX.GetSelCount() as integer
+function PSLISTBOX.GetSelCount() as integer
     dim as integer n = 0
     for i as integer = 0 to this.rowCount - 1
         if this.rows(i).selected then n += 1
@@ -398,28 +398,28 @@ function CLISTBOX.GetSelCount() as integer
     return n
 end function
 
-sub CLISTBOX.BeginUpdate()
+sub PSLISTBOX.BeginUpdate()
     this.updateDepth += 1
 end sub
 
-sub CLISTBOX.EndUpdate()
+sub PSLISTBOX.EndUpdate()
     if this.updateDepth > 0 then this.updateDepth -= 1
     if this.updateDepth = 0 then this.Refresh()
 end sub
 
 ' Called by every model mutator. Coalesces into a single Refresh when a
 ' BeginUpdate/EndUpdate batch is active.
-sub CLISTBOX.NotifyChange()
+sub PSLISTBOX.NotifyChange()
     if this.updateDepth = 0 then this.Refresh()
 end sub
 
-sub CLISTBOX.Refresh()
+sub PSLISTBOX.Refresh()
     ' Capture the listbox's actual scroll position back into the model BEFORE the
     ' rebuild: the sync below pushes LB_SETCOUNT (which resets the Win32 listbox's
     ' top and caret), and the OLD visibleMap still matches the listbox contents at
     ' this point, so the translation is valid. This is what lets a scroll made by
     ' the user (wheel / keyboard / scrollbar) survive any rebuild.
-    CListBox_CaptureTopRow( @this )
+    PsListBox_CaptureTopRow( @this )
     this.RebuildVisibleMap()
     dim as HWND hList = GetDlgItem( this.hWin, this.idc_ListBox )
     if hList = 0 then exit sub
@@ -427,7 +427,7 @@ sub CLISTBOX.Refresh()
     ' Re-derive the Win32 listbox (count, caret, top row) and the scrollbar from
     ' the model, then repaint WITH background erase so the vacated region below the
     ' last row is cleared when the list shrinks (delete / collapse).
-    CListBox_SyncViewFromModel( @this )
+    PsListBox_SyncViewFromModel( @this )
     InvalidateRect( hList, NULL, TRUE )
 end sub
 
@@ -437,7 +437,7 @@ end sub
 ' ========================================================================================
 '
 ' THE CONTROL HANDLE
-'   Every CListBox_* function takes the handle returned by CListBox_Create(). That handle
+'   Every PsListBox_* function takes the handle returned by PsListBox_Create(). That handle
 '   is the container window, which hosts three children: the owner-drawn LISTBOX, the
 '   vertical scrollbar, and the (optional, hidden by default) column header band. The
 '   functions resolve those children internally. Never pass the child listbox handle --
@@ -458,7 +458,7 @@ end sub
 '   A row is either a header or an item. Items belong to the nearest preceding header;
 '   there is exactly one level of nesting (no nested headers). Collapsing a header hides
 '   its items. Headers are selectable and are returned by GetSelItems, so use
-'   CListBox_IsHeader() to tell them apart.
+'   PsListBox_IsHeader() to tell them apart.
 '
 ' LIFETIME
 '   The control frees itself when its window is destroyed. Fonts you pass in stay yours.
@@ -469,28 +469,28 @@ end sub
 '   column header CtrlID + 2). The control is created zero-sized: position it with
 '   SetWindowPos().
 ' ----------------------------------------------------------------------------------------
-declare function CListBox_Create( byval hWndParent as HWND, byval CtrlID as integer ) as HWND
+declare function PsListBox_Create( byval hWndParent as HWND, byval CtrlID as integer ) as HWND
 
 ' ----------------------------------------------------------------------------------------
 ' Adding / removing rows.  Add* and Insert* return the new row's model index, or -1.
 ' Wrap bulk loads in BeginUpdate/EndUpdate: it collapses the per-row rebuild+repaint into
 ' one, turning an O(n^2) load into O(n). The pairs nest.
 ' ----------------------------------------------------------------------------------------
-declare function CListBox_AddString( byval hListControl as HWND, byval Text as DWSTRING, byval itemData as integer = 0, byval itemDataExtra as integer = 0 ) as integer
-declare function CListBox_AddHeader( byval hListControl as HWND, byval Text as DWSTRING, byval itemData as integer = 0, byval itemDataExtra as integer = 0 ) as integer
-declare function CListBox_InsertString( byval hListControl as HWND, byval row as integer, byval Text as DWSTRING, byval itemData as integer = 0, byval itemDataExtra as integer = 0 ) as integer
-declare function CListBox_DeleteString( byval hListControl as HWND, byval row as integer ) as boolean
-declare sub      CListBox_Clear( byval hListControl as HWND )
-declare sub      CListBox_BeginUpdate( byval hListControl as HWND )
-declare sub      CListBox_EndUpdate( byval hListControl as HWND )
-declare sub      CListBox_Refresh( byval hListControl as HWND )
+declare function PsListBox_AddString( byval hListControl as HWND, byval Text as DWSTRING, byval itemData as integer = 0, byval itemDataExtra as integer = 0 ) as integer
+declare function PsListBox_AddHeader( byval hListControl as HWND, byval Text as DWSTRING, byval itemData as integer = 0, byval itemDataExtra as integer = 0 ) as integer
+declare function PsListBox_InsertString( byval hListControl as HWND, byval row as integer, byval Text as DWSTRING, byval itemData as integer = 0, byval itemDataExtra as integer = 0 ) as integer
+declare function PsListBox_DeleteString( byval hListControl as HWND, byval row as integer ) as boolean
+declare sub      PsListBox_Clear( byval hListControl as HWND )
+declare sub      PsListBox_BeginUpdate( byval hListControl as HWND )
+declare sub      PsListBox_EndUpdate( byval hListControl as HWND )
+declare sub      PsListBox_Refresh( byval hListControl as HWND )
 
 ' ----------------------------------------------------------------------------------------
 ' Counts.  GetCount = every row in the model. GetVisibleCount = rows currently on show
 ' (headers + items of expanded groups). They differ whenever anything is collapsed.
 ' ----------------------------------------------------------------------------------------
-declare function CListBox_GetCount( byval hListControl as HWND ) as integer
-declare function CListBox_GetVisibleCount( byval hListControl as HWND ) as integer
+declare function PsListBox_GetCount( byval hListControl as HWND ) as integer
+declare function PsListBox_GetVisibleCount( byval hListControl as HWND ) as integer
 
 ' ----------------------------------------------------------------------------------------
 ' Row contents.  Set* return FALSE for an invalid row index.
@@ -500,27 +500,27 @@ declare function CListBox_GetVisibleCount( byval hListControl as HWND ) as integ
 '   can be populated before or after columns are added. col < 0 fails; col beyond the
 '   defined columns is legal storage (it paints once a matching column exists).
 ' ----------------------------------------------------------------------------------------
-declare function CListBox_GetText( byval hListControl as HWND, byval row as integer ) as DWSTRING
-declare function CListBox_SetText( byval hListControl as HWND, byval row as integer, byval Text as DWSTRING ) as boolean
-declare function CListBox_GetCellText( byval hListControl as HWND, byval row as integer, byval col as integer ) as DWSTRING
-declare function CListBox_SetCellText( byval hListControl as HWND, byval row as integer, byval col as integer, byval Text as DWSTRING ) as boolean
-declare function CListBox_GetItemData( byval hListControl as HWND, byval row as integer ) as integer
-declare function CListBox_SetItemData( byval hListControl as HWND, byval row as integer, byval itemData as integer ) as boolean
-declare function CListBox_GetItemDataExtra( byval hListControl as HWND, byval row as integer ) as integer
-declare function CListBox_SetItemDataExtra( byval hListControl as HWND, byval row as integer, byval itemDataExtra as integer ) as boolean
+declare function PsListBox_GetText( byval hListControl as HWND, byval row as integer ) as DWSTRING
+declare function PsListBox_SetText( byval hListControl as HWND, byval row as integer, byval Text as DWSTRING ) as boolean
+declare function PsListBox_GetCellText( byval hListControl as HWND, byval row as integer, byval col as integer ) as DWSTRING
+declare function PsListBox_SetCellText( byval hListControl as HWND, byval row as integer, byval col as integer, byval Text as DWSTRING ) as boolean
+declare function PsListBox_GetItemData( byval hListControl as HWND, byval row as integer ) as integer
+declare function PsListBox_SetItemData( byval hListControl as HWND, byval row as integer, byval itemData as integer ) as boolean
+declare function PsListBox_GetItemDataExtra( byval hListControl as HWND, byval row as integer ) as integer
+declare function PsListBox_SetItemDataExtra( byval hListControl as HWND, byval row as integer, byval itemDataExtra as integer ) as boolean
 
 ' ----------------------------------------------------------------------------------------
 ' Groups / collapsing.  Collapse/Expand/Toggle act only on header rows and return FALSE
 ' for items or invalid rows. A mouse click on a header toggles it without disturbing the
 ' selection; the keyboard uses Left/Right.
 ' ----------------------------------------------------------------------------------------
-declare function CListBox_IsHeader( byval hListControl as HWND, byval row as integer ) as boolean
-declare function CListBox_IsCollapsed( byval hListControl as HWND, byval row as integer ) as boolean
-declare function CListBox_CollapseRow( byval hListControl as HWND, byval row as integer ) as boolean
-declare function CListBox_ExpandRow( byval hListControl as HWND, byval row as integer ) as boolean
-declare function CListBox_ToggleRow( byval hListControl as HWND, byval row as integer ) as boolean
-declare function CListBox_CollapseAll( byval hListControl as HWND ) as boolean
-declare function CListBox_ExpandAll( byval hListControl as HWND ) as boolean
+declare function PsListBox_IsHeader( byval hListControl as HWND, byval row as integer ) as boolean
+declare function PsListBox_IsCollapsed( byval hListControl as HWND, byval row as integer ) as boolean
+declare function PsListBox_CollapseRow( byval hListControl as HWND, byval row as integer ) as boolean
+declare function PsListBox_ExpandRow( byval hListControl as HWND, byval row as integer ) as boolean
+declare function PsListBox_ToggleRow( byval hListControl as HWND, byval row as integer ) as boolean
+declare function PsListBox_CollapseAll( byval hListControl as HWND ) as boolean
+declare function PsListBox_ExpandAll( byval hListControl as HWND ) as boolean
 
 ' ----------------------------------------------------------------------------------------
 ' Selection.  Selection is stored on the rows, so it survives collapse/expand and can
@@ -531,46 +531,46 @@ declare function CListBox_ExpandAll( byval hListControl as HWND ) as boolean
 '   GetCurSel/SetCurSel address the focused row. SetCurSel selects only that row.
 '   GetSelItems reports ALL selected rows, hidden ones included, and redims selItems().
 ' ----------------------------------------------------------------------------------------
-declare function CListBox_GetCurSel( byval hListControl as HWND ) as integer
-declare function CListBox_SetCurSel( byval hListControl as HWND, byval row as integer ) as integer
-declare function CListBox_GetSel( byval hListControl as HWND, byval row as integer ) as boolean
-declare function CListBox_SetSel( byval hListControl as HWND, byval row as integer, byval state as boolean ) as boolean
-declare function CListBox_GetSelCount( byval hListControl as HWND ) as integer
-declare function CListBox_GetSelItems( byval hListControl as HWND, selItems() as integer ) as integer
-declare sub      CListBox_SelectAll( byval hListControl as HWND, byval state as boolean )
-declare function CListBox_SetMultiSelect( byval hListControl as HWND, byval enable as boolean ) as boolean
-declare function CListBox_SetExtendedSelect( byval hListControl as HWND, byval enable as boolean ) as boolean
-declare function CListBox_PreventDoubleClick( byval hListControl as HWND, byval enable as boolean = true ) as boolean
-declare function CListBox_GetTopIndex( byval hListControl as HWND ) as integer
-declare function CListBox_SetTopIndex( byval hListControl as HWND, byval row as integer ) as integer
+declare function PsListBox_GetCurSel( byval hListControl as HWND ) as integer
+declare function PsListBox_SetCurSel( byval hListControl as HWND, byval row as integer ) as integer
+declare function PsListBox_GetSel( byval hListControl as HWND, byval row as integer ) as boolean
+declare function PsListBox_SetSel( byval hListControl as HWND, byval row as integer, byval state as boolean ) as boolean
+declare function PsListBox_GetSelCount( byval hListControl as HWND ) as integer
+declare function PsListBox_GetSelItems( byval hListControl as HWND, selItems() as integer ) as integer
+declare sub      PsListBox_SelectAll( byval hListControl as HWND, byval state as boolean )
+declare function PsListBox_SetMultiSelect( byval hListControl as HWND, byval enable as boolean ) as boolean
+declare function PsListBox_SetExtendedSelect( byval hListControl as HWND, byval enable as boolean ) as boolean
+declare function PsListBox_PreventDoubleClick( byval hListControl as HWND, byval enable as boolean = true ) as boolean
+declare function PsListBox_GetTopIndex( byval hListControl as HWND ) as integer
+declare function PsListBox_SetTopIndex( byval hListControl as HWND, byval row as integer ) as integer
 
 ' ----------------------------------------------------------------------------------------
 ' Appearance.  Row height is in unscaled units and is DPI-scaled internally. The font is
 ' borrowed, never owned: keep it alive and destroy it yourself.
 ' ----------------------------------------------------------------------------------------
-declare function CListBox_GetBackColor( byval hListControl as HWND ) as COLORREF
-declare function CListBox_SetBackColor( byval hListControl as HWND, byval clr as COLORREF ) as COLORREF
-declare function CListBox_GetRowHeight( byval hListControl as HWND ) as integer
-declare function CListBox_SetRowHeight( byval hListControl as HWND, byval height as integer ) as integer
-declare function CListBox_GetFont( byval hListControl as HWND ) as HFONT
-declare function CListBox_SetFont( byval hListControl as HWND, byval hFont as HFONT ) as boolean
-declare sub      CListBox_SetHoverTime( byval hListControl as HWND, byval milliseconds as integer )
+declare function PsListBox_GetBackColor( byval hListControl as HWND ) as COLORREF
+declare function PsListBox_SetBackColor( byval hListControl as HWND, byval clr as COLORREF ) as COLORREF
+declare function PsListBox_GetRowHeight( byval hListControl as HWND ) as integer
+declare function PsListBox_SetRowHeight( byval hListControl as HWND, byval height as integer ) as integer
+declare function PsListBox_GetFont( byval hListControl as HWND ) as HFONT
+declare function PsListBox_SetFont( byval hListControl as HWND, byval hFont as HFONT ) as boolean
+declare sub      PsListBox_SetHoverTime( byval hListControl as HWND, byval milliseconds as integer )
 
 ' ----------------------------------------------------------------------------------------
 ' Vertical scrollbar.  Created, positioned, ranged and auto-hidden by this control -- it
 ' appears only while the rows overflow, and the listbox reclaims the width otherwise.
 ' Nothing here is required; it is for theming. GetScrollBar exposes the child for direct
-' CVScrollBar_* calls.
+' PsVScrollBar_* calls.
 ' ----------------------------------------------------------------------------------------
-declare function CListBox_GetScrollBar( byval hListControl as HWND ) as HWND
-declare sub      CListBox_SetScrollBarWidth( byval hListControl as HWND, byval nWidth as integer )
-declare sub      CListBox_SetScrollBarColors( byval hListControl as HWND, byval backclr as COLORREF, byval foreclr as COLORREF, byval foreclrhot as COLORREF )
-declare sub      CListBox_SetScrollBarPaintCallback( byval hListControl as HWND, byval usersub as VScrollPaintCallbackSub )
+declare function PsListBox_GetScrollBar( byval hListControl as HWND ) as HWND
+declare sub      PsListBox_SetScrollBarWidth( byval hListControl as HWND, byval nWidth as integer )
+declare sub      PsListBox_SetScrollBarColors( byval hListControl as HWND, byval backclr as COLORREF, byval foreclr as COLORREF, byval foreclrhot as COLORREF )
+declare sub      PsListBox_SetScrollBarPaintCallback( byval hListControl as HWND, byval usersub as VScrollPaintCallbackSub )
 
 ' ----------------------------------------------------------------------------------------
 ' Columns and the header band.  All optional: with no columns defined the control paints
-' exactly as before. Column state lives in the embedded CColumnHeader child (the single
-' source of truth); these wrappers delegate to it. Widths are PIXELS (see CColumnHeader.bi
+' exactly as before. Column state lives in the embedded PsColumnHeader child (the single
+' source of truth); these wrappers delegate to it. Widths are PIXELS (see PsColumnHeader.bi
 ' for the width/min-width/fill rules); HeaderHeight is unscaled units like RowHeight.
 '
 '   Columns can be defined with the header band hidden (ShowHeader false, the default):
@@ -580,50 +580,50 @@ declare sub      CListBox_SetScrollBarPaintCallback( byval hListControl as HWND,
 '
 '   CALLBACK OWNERSHIP: on an embedded header the control owns the header's own
 '   WidthChanged slot (it must repaint rows on every live resize). Hosts subscribe with
-'   CListBox_SetColumnResizeCallback -- never CColumnHeader_SetWidthChangedCallback on
-'   the child returned by CListBox_GetHeader. The other header callbacks (paint, click,
+'   PsListBox_SetColumnResizeCallback -- never PsColumnHeader_SetWidthChangedCallback on
+'   the child returned by PsListBox_GetHeader. The other header callbacks (paint, click,
 '   autosize, tooltip) pass straight through.
 '
 '   Programmatic setters are silent (family rule): SetColumnWidth repaints but fires no
 '   resize callback; only user drags/autosize notify.
 ' ----------------------------------------------------------------------------------------
-declare function CListBox_AddColumn( byval hListControl as HWND, byval Text as DWSTRING, byval nWidth as integer = 100, byval nMinWidth as integer = 0, byval itemData as integer = 0 ) as integer
-declare function CListBox_InsertColumn( byval hListControl as HWND, byval idx as integer, byval Text as DWSTRING, byval nWidth as integer = 100, byval nMinWidth as integer = 0, byval itemData as integer = 0 ) as integer
-declare function CListBox_DeleteColumn( byval hListControl as HWND, byval idx as integer ) as boolean
-declare sub      CListBox_ClearColumns( byval hListControl as HWND )
-declare function CListBox_GetColumnCount( byval hListControl as HWND ) as integer
-declare function CListBox_GetColumnText( byval hListControl as HWND, byval idx as integer ) as DWSTRING
-declare function CListBox_SetColumnText( byval hListControl as HWND, byval idx as integer, byval Text as DWSTRING ) as boolean
-declare function CListBox_GetColumnWidth( byval hListControl as HWND, byval idx as integer ) as integer
-declare function CListBox_SetColumnWidth( byval hListControl as HWND, byval idx as integer, byval nWidth as integer ) as boolean
-declare function CListBox_GetColumnMinWidth( byval hListControl as HWND, byval idx as integer ) as integer
-declare function CListBox_SetColumnMinWidth( byval hListControl as HWND, byval idx as integer, byval nMinWidth as integer ) as boolean
-declare function CListBox_GetFillColumn( byval hListControl as HWND ) as integer
-declare function CListBox_SetFillColumn( byval hListControl as HWND, byval idx as integer ) as boolean
-declare function CListBox_ShowHeader( byval hListControl as HWND, byval bShow as boolean = true ) as boolean
-declare function CListBox_IsHeaderVisible( byval hListControl as HWND ) as boolean
-declare function CListBox_GetHeaderHeight( byval hListControl as HWND ) as integer
-declare function CListBox_SetHeaderHeight( byval hListControl as HWND, byval height as integer ) as integer
-declare function CListBox_GetHeader( byval hListControl as HWND ) as HWND
-declare sub      CListBox_SetColumnResizeCallback( byval hListControl as HWND, byval usersub as HDR_WidthChangedCallbackSub )
-declare sub      CListBox_SetColumnClickCallback( byval hListControl as HWND, byval usersub as HDR_ClickCallbackSub )
-declare sub      CListBox_SetColumnAutoSizeCallback( byval hListControl as HWND, byval userfunc as HDR_AutoSizeCallbackFunc )
-declare sub      CListBox_SetHeaderPaintCallback( byval hListControl as HWND, byval usersub as HDR_PaintCallbackSub )
-declare sub      CListBox_SetHeaderTooltipCallback( byval hListControl as HWND, byval userfunc as HDR_TooltipCallbackFunc )
-declare sub      CListBox_SetHeaderBackColor( byval hListControl as HWND, byval clr as COLORREF )
-declare sub      CListBox_SetHeaderFont( byval hListControl as HWND, byval hFont as HFONT )
+declare function PsListBox_AddColumn( byval hListControl as HWND, byval Text as DWSTRING, byval nWidth as integer = 100, byval nMinWidth as integer = 0, byval itemData as integer = 0 ) as integer
+declare function PsListBox_InsertColumn( byval hListControl as HWND, byval idx as integer, byval Text as DWSTRING, byval nWidth as integer = 100, byval nMinWidth as integer = 0, byval itemData as integer = 0 ) as integer
+declare function PsListBox_DeleteColumn( byval hListControl as HWND, byval idx as integer ) as boolean
+declare sub      PsListBox_ClearColumns( byval hListControl as HWND )
+declare function PsListBox_GetColumnCount( byval hListControl as HWND ) as integer
+declare function PsListBox_GetColumnText( byval hListControl as HWND, byval idx as integer ) as DWSTRING
+declare function PsListBox_SetColumnText( byval hListControl as HWND, byval idx as integer, byval Text as DWSTRING ) as boolean
+declare function PsListBox_GetColumnWidth( byval hListControl as HWND, byval idx as integer ) as integer
+declare function PsListBox_SetColumnWidth( byval hListControl as HWND, byval idx as integer, byval nWidth as integer ) as boolean
+declare function PsListBox_GetColumnMinWidth( byval hListControl as HWND, byval idx as integer ) as integer
+declare function PsListBox_SetColumnMinWidth( byval hListControl as HWND, byval idx as integer, byval nMinWidth as integer ) as boolean
+declare function PsListBox_GetFillColumn( byval hListControl as HWND ) as integer
+declare function PsListBox_SetFillColumn( byval hListControl as HWND, byval idx as integer ) as boolean
+declare function PsListBox_ShowHeader( byval hListControl as HWND, byval bShow as boolean = true ) as boolean
+declare function PsListBox_IsHeaderVisible( byval hListControl as HWND ) as boolean
+declare function PsListBox_GetHeaderHeight( byval hListControl as HWND ) as integer
+declare function PsListBox_SetHeaderHeight( byval hListControl as HWND, byval height as integer ) as integer
+declare function PsListBox_GetHeader( byval hListControl as HWND ) as HWND
+declare sub      PsListBox_SetColumnResizeCallback( byval hListControl as HWND, byval usersub as HDR_WidthChangedCallbackSub )
+declare sub      PsListBox_SetColumnClickCallback( byval hListControl as HWND, byval usersub as HDR_ClickCallbackSub )
+declare sub      PsListBox_SetColumnAutoSizeCallback( byval hListControl as HWND, byval userfunc as HDR_AutoSizeCallbackFunc )
+declare sub      PsListBox_SetHeaderPaintCallback( byval hListControl as HWND, byval usersub as HDR_PaintCallbackSub )
+declare sub      PsListBox_SetHeaderTooltipCallback( byval hListControl as HWND, byval userfunc as HDR_TooltipCallbackFunc )
+declare sub      PsListBox_SetHeaderBackColor( byval hListControl as HWND, byval clr as COLORREF )
+declare sub      PsListBox_SetHeaderFont( byval hListControl as HWND, byval hFont as HFONT )
 
 ' ----------------------------------------------------------------------------------------
 ' Callbacks.  See the type declarations above for each signature and contract.
 '   PaintCallback   - draw one row. Required if you want to see anything.
 '   MessageCallback - observe mouse messages; return TRUE to suppress default handling.
-'                     NOTE: the result is ignored for WM_LBUTTONUP (see CListBox.inc).
+'                     NOTE: the result is ignored for WM_LBUTTONUP (see PsListBox.inc).
 '   TooltipCallback - supply per-row tooltip text on demand; "" for none.
 '   SelChangeCallback - the USER selected a different row (mouse OR keyboard). Silent for
 '                     the programmatic setters. This is the only way to see keyboard
 '                     navigation: the control consumes WM_KEYDOWN itself.
 ' ----------------------------------------------------------------------------------------
-declare sub      CListBox_SetPaintCallback( byval hListControl as HWND, byval usersub as PaintCallbackSub )
-declare sub      CListBox_SetMessageCallback( byval hListControl as HWND, byval userfunc as MessageCallbackFunc )
-declare sub      CListBox_SetTooltipCallback( byval hListControl as HWND, byval userfunc as TooltipCallbackFunc )
-declare sub      CListBox_SetSelChangeCallback( byval hListControl as HWND, byval usersub as SelChangeCallbackSub )
+declare sub      PsListBox_SetPaintCallback( byval hListControl as HWND, byval usersub as PaintCallbackSub )
+declare sub      PsListBox_SetMessageCallback( byval hListControl as HWND, byval userfunc as MessageCallbackFunc )
+declare sub      PsListBox_SetTooltipCallback( byval hListControl as HWND, byval userfunc as TooltipCallbackFunc )
+declare sub      PsListBox_SetSelChangeCallback( byval hListControl as HWND, byval usersub as SelChangeCallbackSub )

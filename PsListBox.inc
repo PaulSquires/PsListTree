@@ -1,16 +1,16 @@
 
 ''
-''  CListBox.inc
+''  PsListBox.inc
 ''   
 
-#include once "CListBox.bi"
+#include once "PsListBox.bi"
 
 
-function GetListBoxPointer( byval hListControl as HWND ) as CLISTBOX ptr
+function GetListBoxPointer( byval hListControl as HWND ) as PSLISTBOX ptr
     ' hListBox is actually the overall parent form (ListBox is the child)
     dim pWindow as CWindow ptr = AfxCWindowPtr(hListControl)
-    dim as CLISTBOX ptr pList = null
-    if pWindow then pList = cast( CLISTBOX ptr, pWindow->UserData(0) )
+    dim as PSLISTBOX ptr pList = null
+    if pWindow then pList = cast( PSLISTBOX ptr, pWindow->UserData(0) )
     return pList
 end function
 
@@ -29,7 +29,7 @@ end function
 ' ========================================================================================
 
 ' Row height in pixels, DPI-scaled once. Was LB_GETITEMHEIGHT.
-private function CListBox_ItemHeightPx( byval pList as CLISTBOX ptr ) as integer
+private function PsListBox_ItemHeightPx( byval pList as PSLISTBOX ptr ) as integer
     if pList = 0 then return 0
     if pList->nItemHeightPx > 0 then return pList->nItemHeightPx
     dim as integer h = pList->RowHeight
@@ -41,21 +41,21 @@ private function CListBox_ItemHeightPx( byval pList as CLISTBOX ptr ) as integer
 end function
 
 ' How many rows fit in the surface. Was a client-height / LB_GETITEMHEIGHT division.
-private function CListBox_VisPerPage( byval pList as CLISTBOX ptr ) as integer
+private function PsListBox_VisPerPage( byval pList as PSLISTBOX ptr ) as integer
     if pList = 0 then return 0
     dim as HWND hSurf = GetDlgItem( pList->hWin, pList->idc_ListBox )
     if hSurf = 0 then return 0
     dim as RECT rc : GetClientRect( hSurf, @rc )
-    dim as integer ih = CListBox_ItemHeightPx( pList )
+    dim as integer ih = PsListBox_ItemHeightPx( pList )
     if ih < 1 then return 0
     return (rc.bottom - rc.top) \ ih
 end function
 
 ' Clamp a visible top index the way LB_SETTOPINDEX did: never past the point where the
 ' last row sits at the bottom of the viewport, and never negative.
-private function CListBox_ClampTopVis( byval pList as CLISTBOX ptr, byval vis as integer ) as integer
+private function PsListBox_ClampTopVis( byval pList as PSLISTBOX ptr, byval vis as integer ) as integer
     if pList = 0 then return 0
-    dim as integer maxTop = pList->visibleCount - CListBox_VisPerPage( pList )
+    dim as integer maxTop = pList->visibleCount - PsListBox_VisPerPage( pList )
     if maxTop < 0 then maxTop = 0
     if vis > maxTop then vis = maxTop
     if vis < 0 then vis = 0
@@ -65,9 +65,9 @@ end function
 ' Scroll to a visible top index, clamping. Returns the value actually adopted, which is
 ' what the old code read back out of the listbox with LB_GETTOPINDEX after setting it.
 ' Repaints only when something moved.
-private function CListBox_SetTopVis( byval pList as CLISTBOX ptr, byval vis as integer ) as integer
+private function PsListBox_SetTopVis( byval pList as PSLISTBOX ptr, byval vis as integer ) as integer
     if pList = 0 then return 0
-    dim as integer newTop = CListBox_ClampTopVis( pList, vis )
+    dim as integer newTop = PsListBox_ClampTopVis( pList, vis )
     if newTop <> pList->nTopVis then
         pList->nTopVis = newTop
         dim as HWND hSurf = GetDlgItem( pList->hWin, pList->idc_ListBox )
@@ -80,8 +80,8 @@ end function
 ' The rect a visible row occupies in the surface's client area. Was ListBox_GetItemRect.
 ' Returns FALSE for a row that is not on screen, which the caller must respect -- the old
 ' API returned LB_ERR for the same case.
-private function CListBox_VisIndexRect( _
-            byval pList as CLISTBOX ptr, _
+private function PsListBox_VisIndexRect( _
+            byval pList as PSLISTBOX ptr, _
             byval vis as integer, _
             byref rc as RECT _
             ) as boolean
@@ -91,7 +91,7 @@ private function CListBox_VisIndexRect( _
     dim as HWND hSurf = GetDlgItem( pList->hWin, pList->idc_ListBox )
     if hSurf = 0 then return false
     dim as RECT rcClient : GetClientRect( hSurf, @rcClient )
-    dim as integer ih = CListBox_ItemHeightPx( pList )
+    dim as integer ih = PsListBox_ItemHeightPx( pList )
     dim as integer y  = (vis - pList->nTopVis) * ih
     if y >= rcClient.bottom then return false
     if (y + ih) <= 0 then return false
@@ -104,8 +104,8 @@ end function
 ' the same cases makes that test a plain `>= 0`, which is why every call site reads more
 ' simply now. A point below the last row is NOT a row: the old call reported the nearest
 ' one, and every caller then had to discard it.
-private function CListBox_VisIndexFromPoint( _
-            byval pList as CLISTBOX ptr, _
+private function PsListBox_VisIndexFromPoint( _
+            byval pList as PSLISTBOX ptr, _
             byval x as integer, _
             byval y as integer _
             ) as integer
@@ -115,7 +115,7 @@ private function CListBox_VisIndexFromPoint( _
     dim as RECT rcClient : GetClientRect( hSurf, @rcClient )
     if (x < rcClient.left) orelse (x >= rcClient.right) then return -1
     if (y < rcClient.top)  orelse (y >= rcClient.bottom) then return -1
-    dim as integer ih = CListBox_ItemHeightPx( pList )
+    dim as integer ih = PsListBox_ItemHeightPx( pList )
     if ih < 1 then return -1
     dim as integer vis = pList->nTopVis + (y \ ih)
     if (vis < 0) orelse (vis >= pList->visibleCount) then return -1
@@ -126,10 +126,10 @@ end function
 ' ========================================================================================
 ' Add a string (and optional itemData) to the end of the custom listbox control.
 ' ========================================================================================
-function CListBox_AddString( byval hListControl as HWND, byval Text as DWSTRING, byval itemData as integer = 0, byval itemDataExtra as integer = 0 ) as integer
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_AddString( byval hListControl as HWND, byval Text as DWSTRING, byval itemData as integer = 0, byval itemDataExtra as integer = 0 ) as integer
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return -1
-    dim as CLISTBOX_ROWINFO ptr pRow = pList->AddRow()
+    dim as PSLISTBOX_ROWINFO ptr pRow = pList->AddRow()
     if pRow = null then return -1
     pRow->Text = Text
     pRow->itemData = itemData
@@ -142,10 +142,10 @@ end function
 ' Append a header (group) row. Child items added after it belong to this group
 ' until the next header. Returns the header's model index.
 ' ========================================================================================
-function CListBox_AddHeader( byval hListControl as HWND, byval Text as DWSTRING, byval itemData as integer = 0, byval itemDataExtra as integer = 0 ) as integer
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_AddHeader( byval hListControl as HWND, byval Text as DWSTRING, byval itemData as integer = 0, byval itemDataExtra as integer = 0 ) as integer
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return -1
-    dim as CLISTBOX_ROWINFO ptr pRow = pList->AddRow()
+    dim as PSLISTBOX_ROWINFO ptr pRow = pList->AddRow()
     if pRow = null then return -1
     pRow->IsHeader = true
     pRow->Text = Text
@@ -159,13 +159,13 @@ end function
 ' Insert a row at the given MODEL index (existing rows shift down). Returns the
 ' actual index used (clamped to [0, count]), or -1 on failure.
 ' ========================================================================================
-function CListBox_InsertString( byval hListControl as HWND, byval row as integer, byval Text as DWSTRING, byval itemData as integer = 0, byval itemDataExtra as integer = 0 ) as integer
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_InsertString( byval hListControl as HWND, byval row as integer, byval Text as DWSTRING, byval itemData as integer = 0, byval itemDataExtra as integer = 0 ) as integer
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return -1
     dim as integer at = row
     if at < 0 then at = 0
     if at > pList->GetCount() then at = pList->GetCount()
-    dim as CLISTBOX_ROWINFO ptr pRow = pList->InsertRowAt( at )
+    dim as PSLISTBOX_ROWINFO ptr pRow = pList->InsertRowAt( at )
     if pRow = null then return -1
     pRow->Text = Text
     pRow->itemData = itemData
@@ -177,8 +177,8 @@ end function
 ' ========================================================================================
 ' Delete the row at the given MODEL index. Returns TRUE on success.
 ' ========================================================================================
-function CListBox_DeleteString( byval hListControl as HWND, byval row as integer ) as boolean
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_DeleteString( byval hListControl as HWND, byval row as integer ) as boolean
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return false
     return pList->DeleteRowAt( row )
 end function
@@ -187,8 +187,8 @@ end function
 ' ========================================================================================
 ' Remove all rows from the control.
 ' ========================================================================================
-sub CListBox_Clear( byval hListControl as HWND )
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+sub PsListBox_Clear( byval hListControl as HWND )
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return
     pList->Clear()
 end sub
@@ -198,26 +198,26 @@ end sub
 ' Row type / collapse queries and operations. Collapse/Expand/Toggle only act on
 ' header rows (return FALSE for non-headers or invalid rows).
 ' ========================================================================================
-function CListBox_IsHeader( byval hListControl as HWND, byval row as integer ) as boolean
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_IsHeader( byval hListControl as HWND, byval row as integer ) as boolean
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return false
-    dim as CLISTBOX_ROWINFO ptr pRow = pList->GetRow( row )
+    dim as PSLISTBOX_ROWINFO ptr pRow = pList->GetRow( row )
     if pRow = null then return false
     return pRow->IsHeader
 end function
 
-function CListBox_IsCollapsed( byval hListControl as HWND, byval row as integer ) as boolean
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_IsCollapsed( byval hListControl as HWND, byval row as integer ) as boolean
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return false
-    dim as CLISTBOX_ROWINFO ptr pRow = pList->GetRow( row )
+    dim as PSLISTBOX_ROWINFO ptr pRow = pList->GetRow( row )
     if pRow = null then return false
     return pRow->bCollapsed
 end function
 
-function CListBox_CollapseRow( byval hListControl as HWND, byval row as integer ) as boolean
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_CollapseRow( byval hListControl as HWND, byval row as integer ) as boolean
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return false
-    dim as CLISTBOX_ROWINFO ptr pRow = pList->GetRow( row )
+    dim as PSLISTBOX_ROWINFO ptr pRow = pList->GetRow( row )
     if (pRow = null) orelse (pRow->IsHeader = false) then return false
     if pRow->bCollapsed = false then
         pRow->bCollapsed = true
@@ -226,10 +226,10 @@ function CListBox_CollapseRow( byval hListControl as HWND, byval row as integer 
     return true
 end function
 
-function CListBox_ExpandRow( byval hListControl as HWND, byval row as integer ) as boolean
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_ExpandRow( byval hListControl as HWND, byval row as integer ) as boolean
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return false
-    dim as CLISTBOX_ROWINFO ptr pRow = pList->GetRow( row )
+    dim as PSLISTBOX_ROWINFO ptr pRow = pList->GetRow( row )
     if (pRow = null) orelse (pRow->IsHeader = false) then return false
     if pRow->bCollapsed then
         pRow->bCollapsed = false
@@ -238,10 +238,10 @@ function CListBox_ExpandRow( byval hListControl as HWND, byval row as integer ) 
     return true
 end function
 
-function CListBox_ExpandAll( byval hListControl as HWND ) as boolean
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_ExpandAll( byval hListControl as HWND ) as boolean
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return false
-    dim as CLISTBOX_ROWINFO ptr pRow
+    dim as PSLISTBOX_ROWINFO ptr pRow
     for i as integer = 0 to pList->rowCount - 1
         pRow = pList->GetRow(i)
         if (pRow = null) orelse (pRow->IsHeader = false) then continue for
@@ -251,10 +251,10 @@ function CListBox_ExpandAll( byval hListControl as HWND ) as boolean
     return true
 end function
 
-function CListBox_CollapseAll( byval hListControl as HWND ) as boolean
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_CollapseAll( byval hListControl as HWND ) as boolean
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return false
-    dim as CLISTBOX_ROWINFO ptr pRow
+    dim as PSLISTBOX_ROWINFO ptr pRow
     for i as integer = 0 to pList->rowCount - 1
         pRow = pList->GetRow(i)
         if (pRow = null) orelse (pRow->IsHeader = false) then continue for
@@ -265,10 +265,10 @@ function CListBox_CollapseAll( byval hListControl as HWND ) as boolean
 end function
 
 
-function CListBox_ToggleRow( byval hListControl as HWND, byval row as integer ) as boolean
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_ToggleRow( byval hListControl as HWND, byval row as integer ) as boolean
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return false
-    dim as CLISTBOX_ROWINFO ptr pRow = pList->GetRow( row )
+    dim as PSLISTBOX_ROWINFO ptr pRow = pList->GetRow( row )
     if (pRow = null) orelse (pRow->IsHeader = false) then return false
     pRow->bCollapsed = not pRow->bCollapsed
     pList->NotifyChange()
@@ -280,13 +280,13 @@ end function
 ' Batch multiple model changes into a single visible-map rebuild + repaint. Wrap
 ' bulk inserts in BeginUpdate/EndUpdate to keep loading O(n) instead of O(n^2).
 ' ========================================================================================
-sub CListBox_BeginUpdate( byval hListControl as HWND )
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+sub PsListBox_BeginUpdate( byval hListControl as HWND )
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList then pList->BeginUpdate()
 end sub
 
-sub CListBox_EndUpdate( byval hListControl as HWND )
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+sub PsListBox_EndUpdate( byval hListControl as HWND )
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList then pList->EndUpdate()
 end sub
 
@@ -294,8 +294,8 @@ end sub
 ' ========================================================================================
 ' Number of currently visible rows (headers + non-collapsed items).
 ' ========================================================================================
-function CListBox_GetVisibleCount( byval hListControl as HWND ) as integer
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_GetVisibleCount( byval hListControl as HWND ) as integer
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return 0
     return pList->GetVisibleCount()
 end function
@@ -305,8 +305,8 @@ end function
 ' Set specified row text in the custom listbox control. Returns TRUE on success,
 ' FALSE if the row index is invalid.
 ' ========================================================================================
-function CListBox_SetText( byval hListControl as HWND, byval row as integer, byval Text as DWSTRING ) as boolean
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_SetText( byval hListControl as HWND, byval row as integer, byval Text as DWSTRING ) as boolean
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return false
     if pList->IsValidRow(row) then
         pList->GetRow(row)->Text = Text
@@ -319,11 +319,11 @@ end function
 ' ========================================================================================
 ' Retrieve specified row text from the custom listbox control.
 ' ========================================================================================
-function CListBox_GetText( byval hListControl as HWND, byval row as integer ) as DWSTRING
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_GetText( byval hListControl as HWND, byval row as integer ) as DWSTRING
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return ""
     if pList->IsValidRow(row) = false then return ""
-    dim as CLISTBOX_ROWINFO ptr pRow = pList->GetRow(row)
+    dim as PSLISTBOX_ROWINFO ptr pRow = pList->GetRow(row)
     dim as DWSTRING wszText = pRow->Text
     return wszText
 end function
@@ -334,8 +334,8 @@ end function
 ' live in the row's sparse cells() storage -- see the .bi contract. Storage is grown by
 ' the ROWINFO member sub because fbc cannot parse `redim rows(i).cells(...)`.
 ' ========================================================================================
-function CListBox_SetCellText( byval hListControl as HWND, byval row as integer, byval col as integer, byval Text as DWSTRING ) as boolean
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_SetCellText( byval hListControl as HWND, byval row as integer, byval col as integer, byval Text as DWSTRING ) as boolean
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return false
     if pList->IsValidRow(row) = false then return false
     if col < 0 then return false
@@ -349,13 +349,13 @@ function CListBox_SetCellText( byval hListControl as HWND, byval row as integer,
 end function
 
 
-function CListBox_GetCellText( byval hListControl as HWND, byval row as integer, byval col as integer ) as DWSTRING
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_GetCellText( byval hListControl as HWND, byval row as integer, byval col as integer ) as DWSTRING
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return ""
     if pList->IsValidRow(row) = false then return ""
     if col < 0 then return ""
-    if col = 0 then return CListBox_GetText( hListControl, row )
-    dim as CLISTBOX_ROWINFO ptr pRow = pList->GetRow(row)
+    if col = 0 then return PsListBox_GetText( hListControl, row )
+    dim as PSLISTBOX_ROWINFO ptr pRow = pList->GetRow(row)
     if col - 1 > ubound(pRow->cells) then return ""   ' sparse: never-set cells read ""
     dim as DWSTRING wszText = pRow->cells(col - 1)
     return wszText
@@ -365,8 +365,8 @@ end function
 ' ========================================================================================
 ' Set the user defined row painting callback for the custom listbox control.
 ' ========================================================================================
-sub CListBox_SetPaintCallback( byval hListControl as HWND, byval usersub as PaintCallbackSub )
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+sub PsListBox_SetPaintCallback( byval hListControl as HWND, byval usersub as PaintCallbackSub )
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return 
     pList->PaintCallback = usersub
 end sub
@@ -375,8 +375,8 @@ end sub
 ' ========================================================================================
 ' Set the user defined message callback for the custom listbox control.
 ' ========================================================================================
-sub CListBox_SetMessageCallback( byval hListControl as HWND, byval userfunc as MessageCallbackFunc )
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+sub PsListBox_SetMessageCallback( byval hListControl as HWND, byval userfunc as MessageCallbackFunc )
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return
     pList->MessageCallback = userfunc
 end sub
@@ -386,8 +386,8 @@ end sub
 ' Set the on-demand tooltip text callback. If none is set, the tooltip shows the
 ' hovered row's Text. Return "" from the callback to suppress the tooltip.
 ' ========================================================================================
-sub CListBox_SetTooltipCallback( byval hListControl as HWND, byval userfunc as TooltipCallbackFunc )
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+sub PsListBox_SetTooltipCallback( byval hListControl as HWND, byval userfunc as TooltipCallbackFunc )
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return
     pList->TooltipCallback = userfunc
 end sub
@@ -395,20 +395,20 @@ end sub
 
 ' ========================================================================================
 ' Set the selection-changed callback. Fired only when the USER moves the selection -- with
-' the mouse or the keyboard -- never by CListBox_SetCurSel/SetSel/SelectAll/Clear.
+' the mouse or the keyboard -- never by PsListBox_SetCurSel/SetSel/SelectAll/Clear.
 '
 ' This is the only way to observe keyboard navigation: the control consumes WM_KEYDOWN
 ' itself, so arrow/Page/Home/End moves never reach the message callback.
 ' ========================================================================================
-sub CListBox_SetSelChangeCallback( byval hListControl as HWND, byval usersub as SelChangeCallbackSub )
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+sub PsListBox_SetSelChangeCallback( byval hListControl as HWND, byval usersub as SelChangeCallbackSub )
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return
     pList->SelChangeCallback = usersub
 end sub
 
 
 ' Resolve the tooltip text for a model row: host callback if set, else row Text.
-function CListBox_ResolveTooltipText( byval pList as CLISTBOX ptr, byval modelRow as integer ) as DWSTRING
+function PsListBox_ResolveTooltipText( byval pList as PSLISTBOX ptr, byval modelRow as integer ) as DWSTRING
     if (pList = null) orelse (pList->IsValidRow(modelRow) = false) then return ""
     if pList->TooltipCallback then return pList->TooltipCallback( pList->hWin, modelRow )
     return pList->rows(modelRow).Text
@@ -418,8 +418,8 @@ end function
 ' ========================================================================================
 ' Set the tooltip hovertime for the custom listbox control.
 ' ========================================================================================
-sub CListBox_SetHoverTime( byval hListControl as HWND, byval milliseconds as integer )
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+sub PsListBox_SetHoverTime( byval hListControl as HWND, byval milliseconds as integer )
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return 
     pList->HoverTime = milliseconds
 end sub
@@ -429,8 +429,8 @@ end sub
 ' Set specified row itemData for the custom listbox control.
 ' Returns TRUE on success, FALSE if the row index is invalid.
 ' ========================================================================================
-function CListBox_SetItemData( byval hListControl as HWND, byval row as integer, byval itemData as integer ) as boolean
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_SetItemData( byval hListControl as HWND, byval row as integer, byval itemData as integer ) as boolean
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return false
     if pList->IsValidRow(row) then
         pList->GetRow(row)->itemData = itemData
@@ -439,8 +439,8 @@ function CListBox_SetItemData( byval hListControl as HWND, byval row as integer,
     return false  ' invalid row
 end function
 
-function CListBox_SetItemDataExtra( byval hListControl as HWND, byval row as integer, byval itemDataExtra as integer ) as boolean
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_SetItemDataExtra( byval hListControl as HWND, byval row as integer, byval itemDataExtra as integer ) as boolean
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return false
     if pList->IsValidRow(row) then
         pList->GetRow(row)->itemDataExtra = itemDataExtra
@@ -453,15 +453,15 @@ end function
 ' ========================================================================================
 ' Retrieve specified row itemData from the custom listbox control.
 ' ========================================================================================
-function CListBox_GetItemData( byval hListControl as HWND, byval row as integer ) as integer
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_GetItemData( byval hListControl as HWND, byval row as integer ) as integer
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return 0
     if pList->IsValidRow(row) = false then return 0
     return pList->GetRow(row)->itemData
 end function
 
-function CListBox_GetItemDataExtra( byval hListControl as HWND, byval row as integer ) as integer
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_GetItemDataExtra( byval hListControl as HWND, byval row as integer ) as integer
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return 0
     if pList->IsValidRow(row) = false then return 0
     return pList->GetRow(row)->itemDataExtra
@@ -471,8 +471,8 @@ end function
 ' ========================================================================================
 ' Retrieve the focused/current row (MODEL index), or -1 if none.
 ' ========================================================================================
-function CListBox_GetCurSel( byval hListControl as HWND ) as integer
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_GetCurSel( byval hListControl as HWND ) as integer
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return -1
     return pList->focusRow
 end function
@@ -482,8 +482,8 @@ end function
 ' Focus and select a single row by MODEL index (clears any other selection).
 ' Returns the row, or -1 if the index is invalid.
 ' ========================================================================================
-function CListBox_SetCurSel( byval hListControl as HWND, byval row as integer ) as integer
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_SetCurSel( byval hListControl as HWND, byval row as integer ) as integer
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return -1
     dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
     if pList->IsValidRow(row) = false then
@@ -494,7 +494,7 @@ function CListBox_SetCurSel( byval hListControl as HWND, byval row as integer ) 
         ' or the next genuine user selection of this same row would be swallowed as a
         ' no-change. Same reasoning below.
         pList->lastNotifiedRow = -1
-        CListBox_SyncViewFromModel( pList )
+        PsListBox_SyncViewFromModel( pList )
         if hList then InvalidateRect( hList, NULL, FALSE )
         return -1
     end if
@@ -509,7 +509,7 @@ function CListBox_SetCurSel( byval hListControl as HWND, byval row as integer ) 
     dim as integer visRow = pList->ModelToVisible( row )
     if (hList <> 0) andalso (visRow >= 0) then
         dim as integer visTop  = pList->nTopVis
-        dim as integer perPage = CListBox_ItemsPerPage( pList )
+        dim as integer perPage = PsListBox_ItemsPerPage( pList )
         if perPage < 1 then perPage = 1
         if visRow < visTop then
             pList->topRow = row
@@ -517,7 +517,7 @@ function CListBox_SetCurSel( byval hListControl as HWND, byval row as integer ) 
             pList->topRow = pList->VisibleToModel( visRow - perPage + 1 )
         end if
     end if
-    CListBox_SyncViewFromModel( pList )
+    PsListBox_SyncViewFromModel( pList )
     if hList then InvalidateRect( hList, NULL, FALSE )
     return row
 end function
@@ -529,8 +529,8 @@ end function
 ' Scrolling happens in VISIBLE index space, so nTopVis is translated back through the
 ' visible map before being returned.
 ' ========================================================================================
-function CListBox_GetTopIndex( byval hListControl as HWND ) as integer
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_GetTopIndex( byval hListControl as HWND ) as integer
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return -1
     if pList->visibleCount = 0 then return -1
     return pList->VisibleToModel( pList->nTopVis )
@@ -545,12 +545,12 @@ end function
 ' and the clamp is mirrored back, so the returned value is the MODEL row actually at
 ' the top. Returns -1 if the row or control is invalid.
 ' ========================================================================================
-function CListBox_SetTopIndex( byval hListControl as HWND, byval row as integer ) as integer
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_SetTopIndex( byval hListControl as HWND, byval row as integer ) as integer
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return -1
     if pList->IsValidRow(row) = false then return -1
     pList->topRow = row
-    CListBox_SyncViewFromModel( pList )
+    PsListBox_SyncViewFromModel( pList )
     return pList->topRow
 end function
 
@@ -559,14 +559,14 @@ end function
 ' Model-based selection API. Selection lives on the rows (per-row flag), so it
 ' survives collapse/expand and can include headers and hidden rows.
 ' ========================================================================================
-function CListBox_GetSel( byval hListControl as HWND, byval row as integer ) as boolean
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_GetSel( byval hListControl as HWND, byval row as integer ) as boolean
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return false
     return pList->IsRowSelected( row )
 end function
 
-function CListBox_SetSel( byval hListControl as HWND, byval row as integer, byval state as boolean ) as boolean
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_SetSel( byval hListControl as HWND, byval row as integer, byval state as boolean ) as boolean
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return false
     if pList->IsValidRow(row) = false then return false
     pList->SetRowSelected( row, state )
@@ -575,16 +575,16 @@ function CListBox_SetSel( byval hListControl as HWND, byval row as integer, byva
     return true
 end function
 
-function CListBox_GetSelCount( byval hListControl as HWND ) as integer
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_GetSelCount( byval hListControl as HWND ) as integer
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return 0
     return pList->GetSelCount()
 end function
 
 ' Fill selItems() with the MODEL indices of every selected row (including hidden
 ' rows under a collapsed header). Returns the count.
-function CListBox_GetSelItems( byval hListControl as HWND, selItems() as integer ) as integer
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_GetSelItems( byval hListControl as HWND, selItems() as integer ) as integer
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return 0
     dim as integer n = pList->GetSelCount()
     if n = 0 then
@@ -602,8 +602,8 @@ function CListBox_GetSelItems( byval hListControl as HWND, selItems() as integer
     return n
 end function
 
-sub CListBox_SelectAll( byval hListControl as HWND, byval state as boolean )
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+sub PsListBox_SelectAll( byval hListControl as HWND, byval state as boolean )
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return
     for i as integer = 0 to pList->rowCount - 1
         pList->rows(i).selected = state
@@ -614,16 +614,16 @@ end sub
 
 ' Selection modes are mutually exclusive: extended (Shift/Ctrl ranges) vs.
 ' multiple (each click toggles). Off = single-select.
-function CListBox_SetMultiSelect( byval hListControl as HWND, byval enable as boolean ) as boolean
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_SetMultiSelect( byval hListControl as HWND, byval enable as boolean ) as boolean
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return false
     pList->MultipleSel = enable
     if enable then pList->ExtendSel = false
     return true
 end function
 
-function CListBox_SetExtendedSelect( byval hListControl as HWND, byval enable as boolean ) as boolean
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_SetExtendedSelect( byval hListControl as HWND, byval enable as boolean ) as boolean
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return false
     pList->ExtendSel = enable
     if enable then pList->MultipleSel = false
@@ -640,8 +640,8 @@ end function
 ' The default listbox handling still runs for every message (it owns the mouse
 ' capture), so the down->up capture pairing is untouched.
 ' ========================================================================================
-function CListBox_PreventDoubleClick( byval hListControl as HWND, byval enable as boolean = true ) as boolean
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_PreventDoubleClick( byval hListControl as HWND, byval enable as boolean = true ) as boolean
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return false
     pList->PreventDblClick = enable
     if enable = false then pList->skipNextLBtnUp = false
@@ -652,8 +652,8 @@ end function
 ' ========================================================================================
 ' Retrieve the row height from the custom listbox control.
 ' ========================================================================================
-function CListBox_GetRowHeight( byval hListControl as HWND ) as integer
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_GetRowHeight( byval hListControl as HWND ) as integer
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return 0
     return pList->RowHeight    
 end function
@@ -662,20 +662,20 @@ end function
 ' ========================================================================================
 ' Set the row height for the custom listbox control.
 ' ========================================================================================
-function CListBox_SetRowHeight( byval hListControl as HWND, byval height as integer ) as integer
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_SetRowHeight( byval hListControl as HWND, byval height as integer ) as integer
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return -1
     pList->RowHeight = height
     ' Recompute the scaled pixel height and repaint. This used to be an LB_SETITEMHEIGHT
     ' plus a note that WM_MEASUREITEM only fires at creation; owning the metric outright
     ' makes that whole caveat disappear.
-    pList->nItemHeightPx = 0                 ' force CListBox_ItemHeightPx to re-derive
-    CListBox_ItemHeightPx( pList )
+    pList->nItemHeightPx = 0                 ' force PsListBox_ItemHeightPx to re-derive
+    PsListBox_ItemHeightPx( pList )
     dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
     if hList then AfxRedrawWindow( hList )
     ' Row height changes items-per-page, which changes the scrollbar range (and can
     ' flip whether it is needed at all).
-    CListBox_SyncScrollBar( pList )
+    PsListBox_SyncScrollBar( pList )
     return height
 end function
 
@@ -683,8 +683,8 @@ end function
 ' ========================================================================================
 ' Retrieve the font used to paint row text.
 ' ========================================================================================
-function CListBox_GetFont( byval hListControl as HWND ) as HFONT
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_GetFont( byval hListControl as HWND ) as HFONT
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return 0
     return pList->hFont
 end function
@@ -694,8 +694,8 @@ end function
 ' Set the font used to paint row text. The caller owns the HFONT and is responsible for
 ' destroying it; the control only stores the handle.
 ' ========================================================================================
-function CListBox_SetFont( byval hListControl as HWND, byval hFont as HFONT ) as boolean
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_SetFont( byval hListControl as HWND, byval hFont as HFONT ) as boolean
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return false
     pList->hFont = hFont
     dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
@@ -708,36 +708,36 @@ end function
 ' Owner-drawn vertical scrollbar. The control creates, positions, auto-hides and drives
 ' it; these just expose it for appearance tweaks.
 ' ========================================================================================
-function CListBox_GetScrollBar( byval hListControl as HWND ) as HWND
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_GetScrollBar( byval hListControl as HWND ) as HWND
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return 0
     return pList->hScrollBar
 end function
 
 ' Width in unscaled units; it is DPI-scaled when the control is laid out.
-sub CListBox_SetScrollBarWidth( byval hListControl as HWND, byval nWidth as integer )
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+sub PsListBox_SetScrollBarWidth( byval hListControl as HWND, byval nWidth as integer )
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return
     if nWidth < 1 then nWidth = 1
     pList->ScrollBarWidth = nWidth
-    CListBox_PositionWindows( pList->hWin )
+    PsListBox_PositionWindows( pList->hWin )
 end sub
 
-sub CListBox_SetScrollBarColors( byval hListControl as HWND, byval backclr as COLORREF, byval foreclr as COLORREF, byval foreclrhot as COLORREF )
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+sub PsListBox_SetScrollBarColors( byval hListControl as HWND, byval backclr as COLORREF, byval foreclr as COLORREF, byval foreclrhot as COLORREF )
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return
-    if pList->hScrollBar then CVScrollBar_SetColors( pList->hScrollBar, backclr, foreclr, foreclrhot )
+    if pList->hScrollBar then PsVScrollBar_SetColors( pList->hScrollBar, backclr, foreclr, foreclrhot )
 end sub
 
-sub CListBox_SetScrollBarPaintCallback( byval hListControl as HWND, byval usersub as VScrollPaintCallbackSub )
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+sub PsListBox_SetScrollBarPaintCallback( byval hListControl as HWND, byval usersub as VScrollPaintCallbackSub )
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return
-    if pList->hScrollBar then CVScrollBar_SetPaintCallback( pList->hScrollBar, usersub )
+    if pList->hScrollBar then PsVScrollBar_SetPaintCallback( pList->hScrollBar, usersub )
 end sub
 
 
 ' ========================================================================================
-' Columns / header band. The embedded CColumnHeader child is the single store for column
+' Columns / header band. The embedded PsColumnHeader child is the single store for column
 ' definitions and geometry; these wrappers delegate to it (the scrollbar-wrapper
 ' precedent). Column geometry mutations repaint the listbox -- every visible row's cells
 ' moved -- unless a BeginUpdate batch is open, whose EndUpdate repaint covers it.
@@ -748,7 +748,7 @@ end sub
 ' 0 lives in ROWINFO.Text, columns 1..N in cells(0..N-1). Storage is sparse, so a row
 ' storing fewer cells than the mutation point needs no shift (its later columns were
 ' already ""). O(rows x cols); the caller wraps it in a single repaint.
-private sub CListBox_ShiftCellColumns( byval pList as CLISTBOX ptr, byval idx as integer, byval nDir as integer )
+private sub PsListBox_ShiftCellColumns( byval pList as PSLISTBOX ptr, byval idx as integer, byval nDir as integer )
     if pList = null then exit sub
     if idx < 0 then exit sub
     for r as integer = 0 to pList->rowCount - 1
@@ -799,199 +799,199 @@ end sub
 
 ' Repaint the child listbox after a column-geometry change (no background erase: the row
 ' paint callback fills every pixel). No-op inside a BeginUpdate batch.
-private sub CListBox_InvalidateRowsForColumns( byval pList as CLISTBOX ptr )
+private sub PsListBox_InvalidateRowsForColumns( byval pList as PSLISTBOX ptr )
     if pList = null then exit sub
     if pList->updateDepth > 0 then exit sub
     dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
     if hList then InvalidateRect( hList, NULL, FALSE )
 end sub
 
-function CListBox_AddColumn( byval hListControl as HWND, byval Text as DWSTRING, byval nWidth as integer = 100, byval nMinWidth as integer = 0, byval itemData as integer = 0 ) as integer
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_AddColumn( byval hListControl as HWND, byval Text as DWSTRING, byval nWidth as integer = 100, byval nMinWidth as integer = 0, byval itemData as integer = 0 ) as integer
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return -1
-    dim as integer idx = CColumnHeader_AddColumn( pList->hHeader, Text, nWidth, nMinWidth, itemData )
-    if idx <> -1 then CListBox_InvalidateRowsForColumns( pList )
+    dim as integer idx = PsColumnHeader_AddColumn( pList->hHeader, Text, nWidth, nMinWidth, itemData )
+    if idx <> -1 then PsListBox_InvalidateRowsForColumns( pList )
     return idx
 end function
 
-function CListBox_InsertColumn( byval hListControl as HWND, byval idx as integer, byval Text as DWSTRING, byval nWidth as integer = 100, byval nMinWidth as integer = 0, byval itemData as integer = 0 ) as integer
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_InsertColumn( byval hListControl as HWND, byval idx as integer, byval Text as DWSTRING, byval nWidth as integer = 100, byval nMinWidth as integer = 0, byval itemData as integer = 0 ) as integer
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return -1
-    dim as integer at = CColumnHeader_InsertColumn( pList->hHeader, idx, Text, nWidth, nMinWidth, itemData )
+    dim as integer at = PsColumnHeader_InsertColumn( pList->hHeader, idx, Text, nWidth, nMinWidth, itemData )
     if at <> -1 then
         ' Keep every row's cell storage aligned with the shifted column indices.
-        CListBox_ShiftCellColumns( pList, at, 1 )
-        CListBox_InvalidateRowsForColumns( pList )
+        PsListBox_ShiftCellColumns( pList, at, 1 )
+        PsListBox_InvalidateRowsForColumns( pList )
     end if
     return at
 end function
 
-function CListBox_DeleteColumn( byval hListControl as HWND, byval idx as integer ) as boolean
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_DeleteColumn( byval hListControl as HWND, byval idx as integer ) as boolean
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return false
-    if CColumnHeader_DeleteColumn( pList->hHeader, idx ) = false then return false
-    CListBox_ShiftCellColumns( pList, idx, -1 )
-    CListBox_InvalidateRowsForColumns( pList )
+    if PsColumnHeader_DeleteColumn( pList->hHeader, idx ) = false then return false
+    PsListBox_ShiftCellColumns( pList, idx, -1 )
+    PsListBox_InvalidateRowsForColumns( pList )
     return true
 end function
 
-sub CListBox_ClearColumns( byval hListControl as HWND )
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+sub PsListBox_ClearColumns( byval hListControl as HWND )
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return
-    CColumnHeader_Clear( pList->hHeader )
+    PsColumnHeader_Clear( pList->hHeader )
     ' Cell TEXT is row data, not column geometry: it survives a column-definition
     ' clear the same way it predates a late column definition (sparse storage).
-    CListBox_InvalidateRowsForColumns( pList )
+    PsListBox_InvalidateRowsForColumns( pList )
 end sub
 
-function CListBox_GetColumnCount( byval hListControl as HWND ) as integer
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_GetColumnCount( byval hListControl as HWND ) as integer
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return 0
-    return CColumnHeader_GetCount( pList->hHeader )
+    return PsColumnHeader_GetCount( pList->hHeader )
 end function
 
-function CListBox_GetColumnText( byval hListControl as HWND, byval idx as integer ) as DWSTRING
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_GetColumnText( byval hListControl as HWND, byval idx as integer ) as DWSTRING
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return ""
-    return CColumnHeader_GetColumnText( pList->hHeader, idx )
+    return PsColumnHeader_GetColumnText( pList->hHeader, idx )
 end function
 
-function CListBox_SetColumnText( byval hListControl as HWND, byval idx as integer, byval Text as DWSTRING ) as boolean
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_SetColumnText( byval hListControl as HWND, byval idx as integer, byval Text as DWSTRING ) as boolean
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return false
     ' Header caption only; row cells are untouched, so no listbox repaint needed.
-    return CColumnHeader_SetColumnText( pList->hHeader, idx, Text )
+    return PsColumnHeader_SetColumnText( pList->hHeader, idx, Text )
 end function
 
-function CListBox_GetColumnWidth( byval hListControl as HWND, byval idx as integer ) as integer
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_GetColumnWidth( byval hListControl as HWND, byval idx as integer ) as integer
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return 0
-    return CColumnHeader_GetColumnWidth( pList->hHeader, idx )
+    return PsColumnHeader_GetColumnWidth( pList->hHeader, idx )
 end function
 
-function CListBox_SetColumnWidth( byval hListControl as HWND, byval idx as integer, byval nWidth as integer ) as boolean
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_SetColumnWidth( byval hListControl as HWND, byval idx as integer, byval nWidth as integer ) as boolean
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return false
-    if CColumnHeader_SetColumnWidth( pList->hHeader, idx, nWidth ) = false then return false
-    CListBox_InvalidateRowsForColumns( pList )
+    if PsColumnHeader_SetColumnWidth( pList->hHeader, idx, nWidth ) = false then return false
+    PsListBox_InvalidateRowsForColumns( pList )
     return true
 end function
 
-function CListBox_GetColumnMinWidth( byval hListControl as HWND, byval idx as integer ) as integer
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_GetColumnMinWidth( byval hListControl as HWND, byval idx as integer ) as integer
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return 0
-    return CColumnHeader_GetColumnMinWidth( pList->hHeader, idx )
+    return PsColumnHeader_GetColumnMinWidth( pList->hHeader, idx )
 end function
 
-function CListBox_SetColumnMinWidth( byval hListControl as HWND, byval idx as integer, byval nMinWidth as integer ) as boolean
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_SetColumnMinWidth( byval hListControl as HWND, byval idx as integer, byval nMinWidth as integer ) as boolean
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return false
-    if CColumnHeader_SetColumnMinWidth( pList->hHeader, idx, nMinWidth ) = false then return false
-    CListBox_InvalidateRowsForColumns( pList )
+    if PsColumnHeader_SetColumnMinWidth( pList->hHeader, idx, nMinWidth ) = false then return false
+    PsListBox_InvalidateRowsForColumns( pList )
     return true
 end function
 
-function CListBox_GetFillColumn( byval hListControl as HWND ) as integer
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_GetFillColumn( byval hListControl as HWND ) as integer
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return -1
-    return CColumnHeader_GetFillColumn( pList->hHeader )
+    return PsColumnHeader_GetFillColumn( pList->hHeader )
 end function
 
-function CListBox_SetFillColumn( byval hListControl as HWND, byval idx as integer ) as boolean
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_SetFillColumn( byval hListControl as HWND, byval idx as integer ) as boolean
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return false
-    if CColumnHeader_SetFillColumn( pList->hHeader, idx ) = false then return false
-    CListBox_InvalidateRowsForColumns( pList )
+    if PsColumnHeader_SetFillColumn( pList->hHeader, idx ) = false then return false
+    PsListBox_InvalidateRowsForColumns( pList )
     return true
 end function
 
 ' Show or hide the header band. Changes the listbox's height (items-per-page), so it
 ' re-lays out AND re-syncs the scrollbar -- the same pairing as SetRowHeight.
-function CListBox_ShowHeader( byval hListControl as HWND, byval bShow as boolean = true ) as boolean
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_ShowHeader( byval hListControl as HWND, byval bShow as boolean = true ) as boolean
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return false
     if pList->hHeader = 0 then return false
     if bShow <> pList->headerShown then
         pList->headerShown = bShow
         ShowWindow( pList->hHeader, iif( bShow, SW_SHOW, SW_HIDE ) )
-        CListBox_PositionWindows( pList->hWin )
-        CListBox_SyncScrollBar( pList )
+        PsListBox_PositionWindows( pList->hWin )
+        PsListBox_SyncScrollBar( pList )
     end if
     return true
 end function
 
-function CListBox_IsHeaderVisible( byval hListControl as HWND ) as boolean
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_IsHeaderVisible( byval hListControl as HWND ) as boolean
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return false
     return pList->headerShown
 end function
 
-function CListBox_GetHeaderHeight( byval hListControl as HWND ) as integer
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_GetHeaderHeight( byval hListControl as HWND ) as integer
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return 0
     return pList->HeaderHeight
 end function
 
 ' Height in unscaled units (like RowHeight); DPI-scaled when the control is laid out.
-function CListBox_SetHeaderHeight( byval hListControl as HWND, byval height as integer ) as integer
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_SetHeaderHeight( byval hListControl as HWND, byval height as integer ) as integer
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return -1
     if height < 1 then height = 1
     pList->HeaderHeight = height
-    CListBox_PositionWindows( pList->hWin )
-    CListBox_SyncScrollBar( pList )
+    PsListBox_PositionWindows( pList->hWin )
+    PsListBox_SyncScrollBar( pList )
     return height
 end function
 
-' Escape hatch for direct CColumnHeader_* calls (theming, padding, hit-tests). Do NOT
+' Escape hatch for direct PsColumnHeader_* calls (theming, padding, hit-tests). Do NOT
 ' set the WidthChanged callback on it -- that slot is this control's chain hook; use
-' CListBox_SetColumnResizeCallback.
-function CListBox_GetHeader( byval hListControl as HWND ) as HWND
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+' PsListBox_SetColumnResizeCallback.
+function PsListBox_GetHeader( byval hListControl as HWND ) as HWND
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return 0
     return pList->hHeader
 end function
 
-sub CListBox_SetColumnResizeCallback( byval hListControl as HWND, byval usersub as HDR_WidthChangedCallbackSub )
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+sub PsListBox_SetColumnResizeCallback( byval hListControl as HWND, byval usersub as HDR_WidthChangedCallbackSub )
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return
     pList->ColumnResizeCallback = usersub
 end sub
 
-sub CListBox_SetColumnClickCallback( byval hListControl as HWND, byval usersub as HDR_ClickCallbackSub )
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+sub PsListBox_SetColumnClickCallback( byval hListControl as HWND, byval usersub as HDR_ClickCallbackSub )
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return
-    if pList->hHeader then CColumnHeader_SetClickCallback( pList->hHeader, usersub )
+    if pList->hHeader then PsColumnHeader_SetClickCallback( pList->hHeader, usersub )
 end sub
 
-sub CListBox_SetColumnAutoSizeCallback( byval hListControl as HWND, byval userfunc as HDR_AutoSizeCallbackFunc )
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+sub PsListBox_SetColumnAutoSizeCallback( byval hListControl as HWND, byval userfunc as HDR_AutoSizeCallbackFunc )
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return
-    if pList->hHeader then CColumnHeader_SetAutoSizeCallback( pList->hHeader, userfunc )
+    if pList->hHeader then PsColumnHeader_SetAutoSizeCallback( pList->hHeader, userfunc )
 end sub
 
-sub CListBox_SetHeaderPaintCallback( byval hListControl as HWND, byval usersub as HDR_PaintCallbackSub )
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+sub PsListBox_SetHeaderPaintCallback( byval hListControl as HWND, byval usersub as HDR_PaintCallbackSub )
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return
-    if pList->hHeader then CColumnHeader_SetPaintCallback( pList->hHeader, usersub )
+    if pList->hHeader then PsColumnHeader_SetPaintCallback( pList->hHeader, usersub )
 end sub
 
-sub CListBox_SetHeaderTooltipCallback( byval hListControl as HWND, byval userfunc as HDR_TooltipCallbackFunc )
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+sub PsListBox_SetHeaderTooltipCallback( byval hListControl as HWND, byval userfunc as HDR_TooltipCallbackFunc )
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return
-    if pList->hHeader then CColumnHeader_SetTooltipCallback( pList->hHeader, userfunc )
+    if pList->hHeader then PsColumnHeader_SetTooltipCallback( pList->hHeader, userfunc )
 end sub
 
-sub CListBox_SetHeaderBackColor( byval hListControl as HWND, byval clr as COLORREF )
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+sub PsListBox_SetHeaderBackColor( byval hListControl as HWND, byval clr as COLORREF )
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return
-    if pList->hHeader then CColumnHeader_SetBackColor( pList->hHeader, clr )
+    if pList->hHeader then PsColumnHeader_SetBackColor( pList->hHeader, clr )
 end sub
 
-sub CListBox_SetHeaderFont( byval hListControl as HWND, byval hFont as HFONT )
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+sub PsListBox_SetHeaderFont( byval hListControl as HWND, byval hFont as HFONT )
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return
-    if pList->hHeader then CColumnHeader_SetFont( pList->hHeader, hFont )
+    if pList->hHeader then PsColumnHeader_SetFont( pList->hHeader, hFont )
 end sub
 
 
@@ -999,11 +999,11 @@ end sub
 ' The embedded header reports a USER column resize: every visible row's cells moved, so
 ' repaint the listbox rows, then re-broadcast to the host's ColumnResizeCallback. This
 ' chain hook OWNS the header's WidthChanged slot on an embedded header (same rule as the
-' scrollbar's scroll callback) -- hosts subscribe via CListBox_SetColumnResizeCallback.
+' scrollbar's scroll callback) -- hosts subscribe via PsListBox_SetColumnResizeCallback.
 ' ========================================================================================
-sub CListBox_OnHeaderWidthChanged( byval hHeader as HWND, byval idx as integer, byval nWidth as integer, byval bLive as boolean )
-    ' the header is a child of the CListBox container window
-    dim as CLISTBOX ptr pList = GetListBoxPointer( GetParent(hHeader) )
+sub PsListBox_OnHeaderWidthChanged( byval hHeader as HWND, byval idx as integer, byval nWidth as integer, byval bLive as boolean )
+    ' the header is a child of the PsListBox container window
+    dim as PSLISTBOX ptr pList = GetListBoxPointer( GetParent(hHeader) )
     if pList = 0 then return
     dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
     if hList then InvalidateRect( hList, NULL, FALSE )
@@ -1014,8 +1014,8 @@ end sub
 ' ========================================================================================
 ' Retrieve the background color from the custom listbox control.
 ' ========================================================================================
-function CListBox_GetBackColor( byval hListControl as HWND ) as COLORREF
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_GetBackColor( byval hListControl as HWND ) as COLORREF
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return 0
     return pList->BackColor
 end function
@@ -1024,8 +1024,8 @@ end function
 ' ========================================================================================
 ' Set the background color for the custom listbox control.
 ' ========================================================================================
-function CListBox_SetBackColor( byval hListControl as HWND, byval clr as COLORREF ) as COLORREF 
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_SetBackColor( byval hListControl as HWND, byval clr as COLORREF ) as COLORREF 
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return 0
     dim as COLORREF oldClr = pList->BackColor
     pList->BackColor = clr
@@ -1036,8 +1036,8 @@ end function
 ' ========================================================================================
 ' Retrieve the current row count in the custom listbox control.
 ' ========================================================================================
-function CListBox_GetCount( byval hListControl as HWND ) as integer
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+function PsListBox_GetCount( byval hListControl as HWND ) as integer
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList = null then return 0
     return pList->GetCount()
 end function
@@ -1046,8 +1046,8 @@ end function
 ' ========================================================================================
 ' Refresh the custom listbox control.
 ' ========================================================================================
-sub CListBox_Refresh( byval hListControl as HWND ) 
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hListControl)
+sub PsListBox_Refresh( byval hListControl as HWND ) 
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hListControl)
     if pList then pList->Refresh()
 end sub
 
@@ -1056,8 +1056,8 @@ end sub
 ' ========================================================================================
 ' Position all child windows. Called manually and/or by WM_SIZE
 ' ========================================================================================
-function CListBox_PositionWindows( byval hwnd as HWND ) as LRESULT
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hwnd)
+function PsListBox_PositionWindows( byval hwnd as HWND ) as LRESULT
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hwnd)
     if pList = null then return 0
 
     ' Get the entire client area
@@ -1109,15 +1109,15 @@ end function
 ' ========================================================================================
 ' The scrollbar reports that the user scrolled: move the listbox to that top row.
 ' ========================================================================================
-sub CListBox_OnScrollBarScroll( byval hSB as HWND, byval newPos as integer )
-    ' the scrollbar is a child of the CListBox container window
-    dim as CLISTBOX ptr pList = GetListBoxPointer( GetParent(hSB) )
+sub PsListBox_OnScrollBarScroll( byval hSB as HWND, byval newPos as integer )
+    ' the scrollbar is a child of the PsListBox container window
+    dim as PSLISTBOX ptr pList = GetListBoxPointer( GetParent(hSB) )
     if pList = 0 then return
     ' The control clamps for itself now, where the listbox used to; mirror whatever it
     ' actually did so the thumb can never show a position the list isn't at. SetPos does
     ' not re-enter the callback.
-    dim as integer actual = CListBox_SetTopVis( pList, newPos )
-    if actual <> newPos then CVScrollBar_SetPos( hSB, actual )
+    dim as integer actual = PsListBox_SetTopVis( pList, newPos )
+    if actual <> newPos then PsVScrollBar_SetPos( hSB, actual )
     ' Keep the model's scroll source-of-truth in step with the user's scroll, so a
     ' later rebuild or show re-derives to where the user actually left the list.
     dim as integer modelTop = pList->VisibleToModel( actual )
@@ -1130,22 +1130,22 @@ end sub
 ' decision. Called from every path that can change the row count or the top row, which
 ' is what stops the thumb ever going stale.
 ' ========================================================================================
-sub CListBox_SyncScrollBar( byval pList as CLISTBOX ptr )
+sub PsListBox_SyncScrollBar( byval pList as PSLISTBOX ptr )
     if pList = 0 then return
     if pList->hScrollBar = 0 then return
 
-    CVScrollBar_SetRange( pList->hScrollBar, _
+    PsVScrollBar_SetRange( pList->hScrollBar, _
                           pList->visibleCount, _
-                          CListBox_ItemsPerPage( pList ), _
+                          PsListBox_ItemsPerPage( pList ), _
                           pList->nTopVis )
 
     ' Auto-hide. This only changes the listbox WIDTH, while items-per-page depends on
     ' HEIGHT, so the decision cannot feed back on itself and oscillate.
-    dim as boolean needed = CVScrollBar_NeedsThumb( pList->hScrollBar )
+    dim as boolean needed = PsVScrollBar_NeedsThumb( pList->hScrollBar )
     if needed <> pList->scrollBarShown then
         pList->scrollBarShown = needed
         ShowWindow( pList->hScrollBar, iif( needed, SW_SHOW, SW_HIDE ) )
-        CListBox_PositionWindows( pList->hWin )   ' listbox reclaims / gives up the strip
+        PsListBox_PositionWindows( pList->hWin )   ' listbox reclaims / gives up the strip
     end if
 end sub
 
@@ -1156,7 +1156,7 @@ end sub
 ' at the top of Refresh (so user scrolls survive rebuilds) and when the control is
 ' shown (so scrolls made through paths that bypass the model are absorbed).
 ' ========================================================================================
-sub CListBox_CaptureTopRow( byval pList as CLISTBOX ptr )
+sub PsListBox_CaptureTopRow( byval pList as PSLISTBOX ptr )
     if pList = 0 then return
     if pList->visibleCount = 0 then return
     dim as integer modelRow = pList->VisibleToModel( pList->nTopVis )
@@ -1168,14 +1168,14 @@ end sub
 ' Re-derive the VIEW (top row) and the scrollbar from the MODEL. After any model change --
 ' and whenever the control is shown -- this one routine re-converges them.
 '
-' Formerly CListBox_SyncListboxFromModel, and it lost most of its body with the listbox
+' Formerly PsListBox_SyncListboxFromModel, and it lost most of its body with the listbox
 ' child. LB_SETCOUNT is gone because visibleCount was always the real count; the caret push
 ' is gone because the caret was only ever a listbox artefact (selection is painted from the
 ' model's own per-row flags, which is why LB_SETCURSEL was already restricted to
 ' single-select styles). What remains is the part that was always this control's own work:
 ' translate topRow (model) into a visible slot, clamp it, and tell the scrollbar.
 ' ========================================================================================
-sub CListBox_SyncViewFromModel( byval pList as CLISTBOX ptr )
+sub PsListBox_SyncViewFromModel( byval pList as PSLISTBOX ptr )
     if pList = 0 then return
     dim as HWND hSurf = GetDlgItem( pList->hWin, pList->idc_ListBox )
     if hSurf = 0 then return
@@ -1184,7 +1184,7 @@ sub CListBox_SyncViewFromModel( byval pList as CLISTBOX ptr )
         pList->topRow  = 0
         pList->nTopVis = 0
         InvalidateRect( hSurf, NULL, TRUE )
-        CListBox_SyncScrollBar( pList )
+        PsListBox_SyncScrollBar( pList )
         return
     end if
 
@@ -1209,19 +1209,19 @@ sub CListBox_SyncViewFromModel( byval pList as CLISTBOX ptr )
 
     ' Clamped by the control now, where the listbox used to do it. Mirror the clamped
     ' result back into topRow so the model always reflects what is actually on screen.
-    dim as integer actualVis = CListBox_SetTopVis( pList, visRow )
+    dim as integer actualVis = PsListBox_SetTopVis( pList, visRow )
     dim as integer actualTop = pList->VisibleToModel( actualVis )
     if actualTop >= 0 then pList->topRow = actualTop
 
     InvalidateRect( hSurf, NULL, FALSE )
-    CListBox_SyncScrollBar( pList )
+    PsListBox_SyncScrollBar( pList )
 end sub
 
 
 ' ========================================================================================
-' Process WM_SIZE message for window/dialog: CListBox
+' Process WM_SIZE message for window/dialog: PsListBox
 ' ========================================================================================
-function CListBox_OnSize( _
+function PsListBox_OnSize( _
             byval hwnd as HWND, _
             byval state as UINT, _
             byval cx as long, _
@@ -1229,22 +1229,22 @@ function CListBox_OnSize( _
             ) as LRESULT
     if state <> SIZE_MINIMIZED then
         ' Position all of the child windows
-        CListBox_PositionWindows( hwnd )
+        PsListBox_PositionWindows( hwnd )
         ' Height changed -> items-per-page changed -> scrollbar range changed
-        CListBox_SyncScrollBar( GetListBoxPointer(hwnd) )
+        PsListBox_SyncScrollBar( GetListBoxPointer(hwnd) )
     end if
     function = 0
 end function
  
         
 ' ========================================================================================
-' Process WM_PAINT message for window/dialog: CListBox
+' Process WM_PAINT message for window/dialog: PsListBox
 ' ========================================================================================
-function CListBox_OnPaint( byval hwnd as HWND ) as LRESULT
-    dim as CLISTBOX ptr pList = GetListBoxPointer(hwnd)
+function PsListBox_OnPaint( byval hwnd as HWND ) as LRESULT
+    dim as PSLISTBOX ptr pList = GetListBoxPointer(hwnd)
     if pList = null then return 0
 
-    dim as CBufferPaint b
+    dim as PsBufferPaint b
 
     b.BeginDoubleBuffer(hwnd)
     b.SetBackColor( pList->BackColor )
@@ -1272,11 +1272,11 @@ end function
 ' Keeping p->rc.top = 0 with a per-row coordinate transform was considered and rejected: a
 ' plain client-relative rect is simpler and needs no transform machinery.
 ' ========================================================================================
-function CListBox_OnPaintSurface( byval hSurf as HWND ) as LRESULT
-    dim as CLISTBOX ptr pList = GetListBoxPointer( GetParent( hSurf ) )
+function PsListBox_OnPaintSurface( byval hSurf as HWND ) as LRESULT
+    dim as PSLISTBOX ptr pList = GetListBoxPointer( GetParent( hSurf ) )
     if pList = null then return 0
 
-    dim as CBufferPaint b
+    dim as PsBufferPaint b
     b.BeginDoubleBuffer( hSurf )
 
     ' The control's own background, over the whole client. This also covers the empty
@@ -1287,17 +1287,17 @@ function CListBox_OnPaintSurface( byval hSurf as HWND ) as LRESULT
 
     dim as RECT rcClient
     GetClientRect( hSurf, @rcClient )
-    dim as integer ih = CListBox_ItemHeightPx( pList )
+    dim as integer ih = PsListBox_ItemHeightPx( pList )
 
     ' --- Column geometry, resolved ONCE for the repaint rather than once per row. The
     ' old per-row loop asked the header for every column's rect on every row; columns
     ' cannot move mid-paint, so that was pure repetition. Only the y values vary per row.
-    dim as integer nCols = CColumnHeader_GetCount( pList->hHeader )
+    dim as integer nCols = PsColumnHeader_GetCount( pList->hHeader )
     if nCols > 0 then
         pList->EnsurePaintCells( nCols )
         dim as RECT rcCol
         for c as integer = 0 to nCols - 1
-            CColumnHeader_GetColumnRect( pList->hHeader, c, rcCol )   ' forces layout if dirty
+            PsColumnHeader_GetColumnRect( pList->hHeader, c, rcCol )   ' forces layout if dirty
             with pList->paintCells(c)
                 .iCol = c
                 .rc.left  = rcCol.left
@@ -1321,9 +1321,9 @@ function CListBox_OnPaintSurface( byval hSurf as HWND ) as LRESULT
             dim as boolean isHot = (vis = pList->nLastHotIdx)
 
             dim as integer modelRow = pList->VisibleToModel( vis )
-            dim as CLISTBOX_ROWINFO ptr pRow = pList->GetRow( modelRow )
+            dim as PSLISTBOX_ROWINFO ptr pRow = pList->GetRow( modelRow )
 
-            dim as CLISTBOX_PAINTINFO p
+            dim as PSLISTBOX_PAINTINFO p
             with p
                 .itemID      = modelRow
                 .b           = @b
@@ -1381,9 +1381,9 @@ end function
 
 
 ' ========================================================================================
-' CListBox Window procedure
+' PsListBox Window procedure
 ' ========================================================================================
-function CListBox_WndProc( _
+function PsListBox_WndProc( _
             byval hwnd   as HWND, _
             byval uMsg   as UINT, _
             byval wParam as WPARAM, _
@@ -1391,23 +1391,23 @@ function CListBox_WndProc( _
             ) as LRESULT
 
     select case uMsg
-        HANDLE_MSG (hwnd, WM_SIZE,        CListBox_OnSize)
-        HANDLE_MSG (hwnd, WM_PAINT,       CListBox_OnPaint)
+        HANDLE_MSG (hwnd, WM_SIZE,        PsListBox_OnSize)
+        HANDLE_MSG (hwnd, WM_PAINT,       PsListBox_OnPaint)
         ' WM_MEASUREITEM and WM_DRAWITEM are gone with the listbox child. The container
         ' never painted rows itself -- it forwarded them -- and the surface now paints
-        ' every visible row in one pass in CListBox_OnPaintSurface.
+        ' every visible row in one pass in PsListBox_OnPaintSurface.
 
 
     case WM_NOTIFY
         ' The tooltip asks for its text on demand; supply the current hot row's.
         dim as NMHDR ptr pnmh = cast(NMHDR ptr, lParam)
         if pnmh andalso (pnmh->code = TTN_GETDISPINFOW) then
-            dim as CLISTBOX ptr pList = GetListBoxPointer(hwnd)
+            dim as PSLISTBOX ptr pList = GetListBoxPointer(hwnd)
             if pList then
                 dim as NMTTDISPINFOW ptr pdi = cast(NMTTDISPINFOW ptr, lParam)
                 dim as integer modelRow = pList->VisibleToModel( pList->nLastHotIdx )
                 ' store in an instance-lifetime buffer and point lpszText at it
-                pList->wszTooltip = CListBox_ResolveTooltipText( pList, modelRow )
+                pList->wszTooltip = PsListBox_ResolveTooltipText( pList, modelRow )
                 pdi->lpszText = cast( LPWSTR, pList->wszTooltip.vptr )
                 pdi->hinst    = NULL
             end if
@@ -1421,9 +1421,9 @@ function CListBox_WndProc( _
         ' keyboard) lives only in the listbox -- capture it first so the sync
         ' converges on it instead of snapping back to a stale topRow.
         if wParam then
-            dim as CLISTBOX ptr pList = GetListBoxPointer(hwnd)
-            CListBox_CaptureTopRow( pList )
-            CListBox_SyncViewFromModel( pList )
+            dim as PSLISTBOX ptr pList = GetListBoxPointer(hwnd)
+            PsListBox_CaptureTopRow( pList )
+            PsListBox_SyncViewFromModel( pList )
         end if
 
     ' WM_CTLCOLORLISTBOX is gone with the listbox child. Only a system listbox sends it,
@@ -1434,7 +1434,7 @@ function CListBox_WndProc( _
 
     case WM_NCDESTROY
         ' Delete the stored listbox data pointer
-        dim as CLISTBOX ptr pList = GetListBoxPointer(hwnd)
+        dim as PSLISTBOX ptr pList = GetListBoxPointer(hwnd)
         if pList then
             if IsWindow(pList->hToolTip) then DestroyWindow(pList->hToolTip)
             delete(pList)
@@ -1464,7 +1464,7 @@ end function
 ' current is silent, and so is every programmatic setter -- those update lastNotifiedRow
 ' without calling the callback.
 ' ========================================================================================
-sub CListBox_NotifySelChange( byval pList as CLISTBOX ptr )
+sub PsListBox_NotifySelChange( byval pList as PSLISTBOX ptr )
     if pList = null then return
     if pList->focusRow = pList->lastNotifiedRow then return
     pList->lastNotifiedRow = pList->focusRow
@@ -1478,7 +1478,7 @@ end sub
 ' Apply a mouse-click selection to the model, honoring the selection mode and the
 ' Ctrl/Shift modifiers, then repaint. modelRow must be a valid model row.
 ' ========================================================================================
-sub CListBox_ApplyClickSelection( byval pList as CLISTBOX ptr, byval modelRow as integer, byval isCtrl as boolean, byval isShift as boolean )
+sub PsListBox_ApplyClickSelection( byval pList as PSLISTBOX ptr, byval modelRow as integer, byval isCtrl as boolean, byval isShift as boolean )
     if (pList = null) orelse (pList->IsValidRow(modelRow) = false) then return
 
     if pList->MultipleSel then
@@ -1507,7 +1507,7 @@ sub CListBox_ApplyClickSelection( byval pList as CLISTBOX ptr, byval modelRow as
     pList->focusRow = modelRow
     dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
     if hList then InvalidateRect( hList, NULL, FALSE )
-    CListBox_NotifySelChange( pList )
+    PsListBox_NotifySelChange( pList )
 end sub
 
 
@@ -1515,7 +1515,7 @@ end sub
 ' Clear any hot-tracked row and stop the safety-net timer. Repaints only if a row was
 ' actually hot, so this is cheap to call repeatedly.
 ' ========================================================================================
-sub CListBox_ClearHotTracking( byval pList as CLISTBOX ptr, byval hList as HWND )
+sub PsListBox_ClearHotTracking( byval pList as PSLISTBOX ptr, byval hList as HWND )
     if pList = null then return
     if pList->hotTimerOn then
         KillTimer( hList, IDT_CLISTBOX_HOTTRACK )
@@ -1532,28 +1532,28 @@ end sub
 ' Keyboard-navigation helpers (all operate in MODEL space; movement is over the
 ' currently VISIBLE rows).
 ' ========================================================================================
-function CListBox_ItemsPerPage( byval pList as CLISTBOX ptr ) as integer
-    dim as integer n = CListBox_VisPerPage( pList )
+function PsListBox_ItemsPerPage( byval pList as PSLISTBOX ptr ) as integer
+    dim as integer n = PsListBox_VisPerPage( pList )
     if n < 1 then n = 1
     return n
 end function
 
-sub CListBox_EnsureVisible( byval pList as CLISTBOX ptr, byval modelRow as integer )
+sub PsListBox_EnsureVisible( byval pList as PSLISTBOX ptr, byval modelRow as integer )
     dim as integer vis = pList->ModelToVisible( modelRow )
     if vis < 0 then return
     dim as integer top = pList->nTopVis
-    dim as integer perPage = CListBox_ItemsPerPage( pList )
+    dim as integer perPage = PsListBox_ItemsPerPage( pList )
     if vis < top then
-        CListBox_SetTopVis( pList, vis )
-        CListBox_SyncScrollBar( pList )
+        PsListBox_SetTopVis( pList, vis )
+        PsListBox_SyncScrollBar( pList )
     elseif vis >= top + perPage then
-        CListBox_SetTopVis( pList, vis - perPage + 1 )
-        CListBox_SyncScrollBar( pList )
+        PsListBox_SetTopVis( pList, vis - perPage + 1 )
+        PsListBox_SyncScrollBar( pList )
     end if
 end sub
 
 ' Nearest header at or before modelRow (the group a row belongs to), or -1.
-function CListBox_ParentHeader( byval pList as CLISTBOX ptr, byval modelRow as integer ) as integer
+function PsListBox_ParentHeader( byval pList as PSLISTBOX ptr, byval modelRow as integer ) as integer
     for i as integer = modelRow to 0 step -1
         if pList->rows(i).IsHeader then return i
     next
@@ -1562,7 +1562,7 @@ end function
 
 ' Move the focus to a VISIBLE position (clamped) and apply selection per the
 ' control's mode and the Shift/Ctrl modifiers, then ensure-visible and repaint.
-sub CListBox_MoveFocusVis( byval pList as CLISTBOX ptr, byval newVis as integer, byval isShift as boolean, byval isCtrl as boolean )
+sub PsListBox_MoveFocusVis( byval pList as PSLISTBOX ptr, byval newVis as integer, byval isShift as boolean, byval isCtrl as boolean )
     if pList->visibleCount <= 0 then return
     if newVis < 0 then newVis = 0
     if newVis > pList->visibleCount - 1 then newVis = pList->visibleCount - 1
@@ -1589,55 +1589,55 @@ sub CListBox_MoveFocusVis( byval pList as CLISTBOX ptr, byval newVis as integer,
         pList->anchorRow = newModel
     end if
 
-    CListBox_EnsureVisible( pList, newModel )
+    PsListBox_EnsureVisible( pList, newModel )
     dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
     if hList then InvalidateRect( hList, NULL, FALSE )
     ' Keyboard navigation is the ONLY way a host can see this: WM_KEYDOWN is consumed
     ' here and never reaches the message callback.
-    CListBox_NotifySelChange( pList )
+    PsListBox_NotifySelChange( pList )
 end sub
 
 ' Left arrow: collapse an expanded header, or (from an item) jump to its header.
-sub CListBox_KeyLeft( byval pList as CLISTBOX ptr )
+sub PsListBox_KeyLeft( byval pList as PSLISTBOX ptr )
     dim as integer f = pList->focusRow
     if pList->IsValidRow(f) = false then return
     if pList->rows(f).IsHeader then
         if pList->rows(f).bCollapsed = false then
             pList->rows(f).bCollapsed = true
             pList->NotifyChange()
-            CListBox_EnsureVisible( pList, f )
+            PsListBox_EnsureVisible( pList, f )
         end if
     else
-        dim as integer h = CListBox_ParentHeader( pList, f )
+        dim as integer h = PsListBox_ParentHeader( pList, f )
         if h >= 0 then
             pList->focusRow  = h
             pList->SelectOnly( h )
             pList->anchorRow = h
-            CListBox_EnsureVisible( pList, h )
+            PsListBox_EnsureVisible( pList, h )
             dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
             if hList then InvalidateRect( hList, NULL, FALSE )
-            CListBox_NotifySelChange( pList )
+            PsListBox_NotifySelChange( pList )
         end if
     end if
 end sub
 
 ' Right arrow: expand a collapsed header, or (from an expanded header) step in.
-sub CListBox_KeyRight( byval pList as CLISTBOX ptr )
+sub PsListBox_KeyRight( byval pList as PSLISTBOX ptr )
     dim as integer f = pList->focusRow
     if pList->IsValidRow(f) = false then return
     if pList->rows(f).IsHeader = false then return
     if pList->rows(f).bCollapsed then
         pList->rows(f).bCollapsed = false
         pList->NotifyChange()
-        CListBox_EnsureVisible( pList, f )
+        PsListBox_EnsureVisible( pList, f )
     else
         dim as integer curVis = pList->ModelToVisible( f )
-        CListBox_MoveFocusVis( pList, curVis + 1, false, false )
+        PsListBox_MoveFocusVis( pList, curVis + 1, false, false )
     end if
 end sub
 
 ' Space: toggle the focus row's selection (multi/extended) or select it (single).
-sub CListBox_KeySpace( byval pList as CLISTBOX ptr, byval isCtrl as boolean )
+sub PsListBox_KeySpace( byval pList as PSLISTBOX ptr, byval isCtrl as boolean )
     dim as integer f = pList->focusRow
     if pList->IsValidRow(f) = false then return
     if pList->MultipleSel orelse pList->ExtendSel then
@@ -1648,14 +1648,14 @@ sub CListBox_KeySpace( byval pList as CLISTBOX ptr, byval isCtrl as boolean )
     pList->anchorRow = f
     dim as HWND hList = GetDlgItem( pList->hWin, pList->idc_ListBox )
     if hList then InvalidateRect( hList, NULL, FALSE )
-    CListBox_NotifySelChange( pList )
+    PsListBox_NotifySelChange( pList )
 end sub
 
 
 ' ========================================================================================
-' CListBoxSurface_WndProc -- the window procedure for the row surface.
+' PsListBoxSurface_WndProc -- the window procedure for the row surface.
 '
-' Was CListBoxListBox_SubclassProc, a subclass hung off a system LISTBOX. The body is
+' Was PsListBoxListBox_SubclassProc, a subclass hung off a system LISTBOX. The body is
 ' largely unchanged, because almost none of it ever depended on the listbox: selection,
 ' focus, keyboard navigation, hot tracking, group collapse and the wheel accumulator were
 ' already this control's own code. What changed is the frame around it -- every
@@ -1663,19 +1663,19 @@ end sub
 ' free (taking focus on a click, claiming the arrow keys) are done explicitly, and
 ' WM_PAINT is handled here rather than fanned out into WM_DRAWITEM.
 ' ========================================================================================
-function CListBoxSurface_WndProc ( _
+function PsListBoxSurface_WndProc ( _
             byval hWin   as HWND, _                 ' // Control window handle
             byval uMsg   as UINT, _                 ' // Type of message
             byval _wParam as WPARAM, _               ' // First message parameter
             byval _lParam as LPARAM _               ' // Second message parameter
             ) as LRESULT
 
-    dim as CLISTBOX ptr pList = GetListBoxPointer( GetParent(hWin) )
+    dim as PSLISTBOX ptr pList = GetListBoxPointer( GetParent(hWin) )
 
     ' Per-message scratch info passed to the user MessageCallback. A plain local
     ' (NOT static) so that multiple control instances never share it. The hover
     ' tracking index likewise lives per-instance in pList->nLastHotIdx.
-    dim m as CLISTBOX_MESSAGEINFO
+    dim m as PSLISTBOX_MESSAGEINFO
 
     select case uMsg
         ' Prepare the Callback MessageInfo structure for only the messages that we handle
@@ -1699,7 +1699,7 @@ function CListBoxSurface_WndProc ( _
             ' WM_DRAWITEM per row -- and collapsing those N paint cycles into one is the
             ' whole of the speed win this rewrite bought. It is backend-independent: it
             ' made GDI 25% faster and GDI+ 38% faster.
-            return CListBox_OnPaintSurface( hWin )
+            return PsListBox_OnPaintSurface( hWin )
 
         case WM_ERASEBKGND
             ' The paint fills the entire client, including the strip below the last row,
@@ -1724,7 +1724,7 @@ function CListBoxSurface_WndProc ( _
                 ' is no longer over our client area, clear the hot row ourselves.
                 dim as RECT rcClient : GetClientRect( hWin, @rcClient )
                 if isMouseOverRECT( hWin, rcClient ) = false then
-                    CListBox_ClearHotTracking( pList, hWin )
+                    PsListBox_ClearHotTracking( pList, hWin )
                 end if
                 return 0
             end if
@@ -1736,28 +1736,28 @@ function CListBoxSurface_WndProc ( _
                 dim as boolean isCtrl  = (GetAsyncKeyState(VK_CONTROL) and &H8000)
                 dim as integer curVis  = pList->ModelToVisible( pList->focusRow )
                 if curVis < 0 then curVis = 0        ' no/hidden focus -> start at top
-                dim as integer perPage = CListBox_ItemsPerPage( pList )
+                dim as integer perPage = PsListBox_ItemsPerPage( pList )
                 if perPage < 1 then perPage = 1
 
                 select case _wParam
                     case VK_UP
-                        CListBox_MoveFocusVis( pList, curVis - 1, isShift, isCtrl ) : return 0
+                        PsListBox_MoveFocusVis( pList, curVis - 1, isShift, isCtrl ) : return 0
                     case VK_DOWN
-                        CListBox_MoveFocusVis( pList, curVis + 1, isShift, isCtrl ) : return 0
+                        PsListBox_MoveFocusVis( pList, curVis + 1, isShift, isCtrl ) : return 0
                     case VK_PRIOR    ' PageUp
-                        CListBox_MoveFocusVis( pList, curVis - perPage, isShift, isCtrl ) : return 0
+                        PsListBox_MoveFocusVis( pList, curVis - perPage, isShift, isCtrl ) : return 0
                     case VK_NEXT     ' PageDown
-                        CListBox_MoveFocusVis( pList, curVis + perPage, isShift, isCtrl ) : return 0
+                        PsListBox_MoveFocusVis( pList, curVis + perPage, isShift, isCtrl ) : return 0
                     case VK_HOME
-                        CListBox_MoveFocusVis( pList, 0, isShift, isCtrl ) : return 0
+                        PsListBox_MoveFocusVis( pList, 0, isShift, isCtrl ) : return 0
                     case VK_END
-                        CListBox_MoveFocusVis( pList, pList->visibleCount - 1, isShift, isCtrl ) : return 0
+                        PsListBox_MoveFocusVis( pList, pList->visibleCount - 1, isShift, isCtrl ) : return 0
                     case VK_LEFT
-                        CListBox_KeyLeft( pList ) : return 0
+                        PsListBox_KeyLeft( pList ) : return 0
                     case VK_RIGHT
-                        CListBox_KeyRight( pList ) : return 0
+                        PsListBox_KeyRight( pList ) : return 0
                     case VK_SPACE
-                        CListBox_KeySpace( pList, isCtrl ) : return 0
+                        PsListBox_KeySpace( pList, isCtrl ) : return 0
                 end select
             end if
             ' unhandled keys fall through to the default listbox handler
@@ -1769,7 +1769,7 @@ function CListBoxSurface_WndProc ( _
                 ' kept so slow/precision wheels still scroll smoothly.
                 dim as long linesPerNotch = 3
                 SystemParametersInfo( SPI_GETWHEELSCROLLLINES, 0, @linesPerNotch, 0 )
-                dim as long page = CListBox_ItemsPerPage( pList )
+                dim as long page = PsListBox_ItemsPerPage( pList )
                 if (linesPerNotch < 1) orelse (linesPerNotch > page) then linesPerNotch = page  ' WHEEL_PAGESCROLL / bogus
                 if linesPerNotch < 1 then linesPerNotch = 1
 
@@ -1787,14 +1787,14 @@ function CListBoxSurface_WndProc ( _
                     moved = true
                 wend
                 if moved then
-                    ' Clamped by CListBox_SetTopVis, which is where the listbox's own
+                    ' Clamped by PsListBox_SetTopVis, which is where the listbox's own
                     ' clamping went. It repaints only if the position actually changed,
                     ' so wheeling against the end of the list costs nothing.
-                    CListBox_SetTopVis( pList, nTopIndex )
+                    PsListBox_SetTopVis( pList, nTopIndex )
                     ' The model's scroll source of truth follows the user's wheel, so a
                     ' later rebuild re-derives to where they left it.
-                    CListBox_CaptureTopRow( pList )
-                    CListBox_SyncScrollBar( pList )   ' keep the thumb with the wheel
+                    PsListBox_CaptureTopRow( pList )
+                    PsListBox_SyncScrollBar( pList )   ' keep the thumb with the wheel
                     if (pList->MessageCallback <> 0) andalso pList->MessageCallback( @m ) then return 0
                 end if
             end if
@@ -1815,21 +1815,21 @@ function CListBoxSurface_WndProc ( _
             ' exits quickly (or onto another control), which would strand the hot row
             ' painted. Poll the cursor while we are over the control.
             if (pList <> 0) andalso (pList->hotTimerOn = false) then
-                SetTimer( hWin, IDT_CLISTBOX_HOTTRACK, CLISTBOX_HOTTRACK_MS, NULL )
+                SetTimer( hWin, IDT_CLISTBOX_HOTTRACK, PSLISTBOX_HOTTRACK_MS, NULL )
                 pList->hotTimerOn = true
             end if
 
             ' Invalidate only the rows whose hot state actually changed, sparing the buffer
             ' a full-client repaint per mouse move.
             dim as RECT rc
-            dim as long idx = CListBox_VisIndexFromPoint( pList, GET_X_LPARAM(_lParam), GET_Y_LPARAM(_lParam) )
+            dim as long idx = PsListBox_VisIndexFromPoint( pList, GET_X_LPARAM(_lParam), GET_Y_LPARAM(_lParam) )
             if (pList <> 0) andalso (idx >= 0) then
                 if idx <> pList->nLastHotIdx then
                     ' Repaint the newly-hot row and the previously-hot row. FALSE =
                     ' no background erase; the double buffer fully paints each row.
-                    if CListBox_VisIndexRect( pList, idx, rc ) then InvalidateRect( hWin, @rc, FALSE )
+                    if PsListBox_VisIndexRect( pList, idx, rc ) then InvalidateRect( hWin, @rc, FALSE )
                     if pList->nLastHotIdx <> -1 then
-                        if CListBox_VisIndexRect( pList, pList->nLastHotIdx, rc ) then _
+                        if PsListBox_VisIndexRect( pList, pList->nLastHotIdx, rc ) then _
                             InvalidateRect( hWin, @rc, FALSE )
                     end if
                     pList->nLastHotIdx = idx
@@ -1844,7 +1844,7 @@ function CListBoxSurface_WndProc ( _
 
 
         case WM_MOUSEHOVER
-            dim as long idx = CListBox_VisIndexFromPoint( pList, GET_X_LPARAM(_lParam), GET_Y_LPARAM(_lParam) )
+            dim as long idx = PsListBox_VisIndexFromPoint( pList, GET_X_LPARAM(_lParam), GET_Y_LPARAM(_lParam) )
             if idx >= 0 then
                 ' idx is a VISIBLE index; the callback sees MODEL indices.
                 if pList then m.idx = pList->VisibleToModel( idx )
@@ -1859,7 +1859,7 @@ function CListBoxSurface_WndProc ( _
                 ' Fast path for clearing the hot row (the WM_TIMER poll is the
                 ' fallback for when this message never arrives). The tooltip hides
                 ' itself when the mouse leaves the tool, so nothing to push.
-                CListBox_ClearHotTracking( pList, hWin )
+                PsListBox_ClearHotTracking( pList, hWin )
                 if (pList->MessageCallback <> 0) andalso pList->MessageCallback( @m ) then return 0
             end if
             
@@ -1873,11 +1873,11 @@ function CListBoxSurface_WndProc ( _
             ' plain child window has to ask, or the arrow keys keep going to whatever had
             ' focus before the click.
             SetFocus( hWin )
-            dim as long idx = CListBox_VisIndexFromPoint( pList, GET_X_LPARAM(_lParam), GET_Y_LPARAM(_lParam) )
+            dim as long idx = PsListBox_VisIndexFromPoint( pList, GET_X_LPARAM(_lParam), GET_Y_LPARAM(_lParam) )
             if (pList <> 0) andalso (idx >= 0) then
                 dim as integer modelRow = pList->VisibleToModel( idx )
                 m.idx = modelRow
-                dim as CLISTBOX_ROWINFO ptr pRow = pList->GetRow( modelRow )
+                dim as PSLISTBOX_ROWINFO ptr pRow = pList->GetRow( modelRow )
                 if (pRow <> 0) andalso pRow->IsHeader then
                     ' Header: clicking toggles the group collapse and deliberately
                     ' leaves the selection untouched (a fold gesture, not a select).
@@ -1885,7 +1885,7 @@ function CListBoxSurface_WndProc ( _
                     pList->NotifyChange()
                 else
                     ' Item: apply the mouse selection to the model.
-                    CListBox_ApplyClickSelection( pList, modelRow, m.isCtrl, m.isShift )
+                    PsListBox_ApplyClickSelection( pList, modelRow, m.isCtrl, m.isShift )
                 end if
                 if pList->MessageCallback then
                     if pList->MessageCallback( @m ) then return 0
@@ -1904,7 +1904,7 @@ function CListBoxSurface_WndProc ( _
                 pList->skipNextLBtnUp = false
                 skipNotify = true
             end if
-            dim as long idx = CListBox_VisIndexFromPoint( pList, GET_X_LPARAM(_lParam), GET_Y_LPARAM(_lParam) )
+            dim as long idx = PsListBox_VisIndexFromPoint( pList, GET_X_LPARAM(_lParam), GET_Y_LPARAM(_lParam) )
             if (idx >= 0) andalso (skipNotify = false) then
                 ' idx is a VISIBLE index; the callback sees MODEL indices.
                 if pList then m.idx = pList->VisibleToModel( idx )
@@ -1923,7 +1923,7 @@ function CListBoxSurface_WndProc ( _
 
         case WM_RBUTTONDOWN, _
              WM_LBUTTONDBLCLK
-            dim as long idx = CListBox_VisIndexFromPoint( pList, GET_X_LPARAM(_lParam), GET_Y_LPARAM(_lParam) )
+            dim as long idx = PsListBox_VisIndexFromPoint( pList, GET_X_LPARAM(_lParam), GET_Y_LPARAM(_lParam) )
             dim as boolean suppressDblClk = false
             if (uMsg = WM_LBUTTONDBLCLK) andalso (pList <> 0) then
                 suppressDblClk = pList->PreventDblClick
@@ -1939,13 +1939,13 @@ function CListBoxSurface_WndProc ( _
                 pList->skipNextLBtnUp = true
                 if idx >= 0 then
                     dim as integer modelRow = pList->VisibleToModel( idx )
-                    dim as CLISTBOX_ROWINFO ptr pRow = pList->GetRow( modelRow )
+                    dim as PSLISTBOX_ROWINFO ptr pRow = pList->GetRow( modelRow )
                     if pRow <> 0 then
                         if pRow->IsHeader then
                             pRow->bCollapsed = not pRow->bCollapsed
                             pList->NotifyChange()
                         else
-                            CListBox_ApplyClickSelection( pList, modelRow, m.isCtrl, m.isShift )
+                            PsListBox_ApplyClickSelection( pList, modelRow, m.isCtrl, m.isShift )
                         end if
                     end if
                 end if
@@ -1978,9 +1978,9 @@ end function
 ' ========================================================================================
 ' Create a tooltip that pulls its text on demand (LPSTR_TEXTCALLBACK) for the whole
 ' listbox. Notifications (TTN_GETDISPINFOW) go to the tool's owner = the parent form,
-' which answers them in CListBox_WndProc using the current hot row.
+' which answers them in PsListBox_WndProc using the current hot row.
 ' ========================================================================================
-function CListBox_AddTooltip( byval hCtrl as HWND ) as HWND
+function PsListBox_AddTooltip( byval hCtrl as HWND ) as HWND
     if IsWindow(hCtrl) = 0 then return 0
     dim as HWND hTooltip = CreateWindowExW( 0, "tooltips_class32", "", _
                                             WS_POPUP or TTS_ALWAYSTIP, _
@@ -2008,25 +2008,25 @@ end function
 
 
 ' ========================================================================================
-' CListBox_Create
+' PsListBox_Create
 ' ========================================================================================
-function CListBox_Create( byval hWndParent as HWND, byval CtrlID as integer ) as HWND
+function PsListBox_Create( byval hWndParent as HWND, byval CtrlID as integer ) as HWND
 
     dim pWindow as CWindow ptr = New CWindow
 
     dim as HWND hForm = _
-            pWindow->Create( hWndParent, "", @CListBox_WndProc, _
+            pWindow->Create( hWndParent, "", @PsListBox_WndProc, _
             0, 0, 0, 0, WS_CHILD or WS_CLIPSIBLINGS or WS_CLIPCHILDREN _
             )
     ' CtrlID becomes the control window's id (GWLP_ID) so hosts can locate the
-    ' control with GetDlgItem, same contract as CVScrollBar/CStatusBar/CTabBar.
+    ' control with GetDlgItem, same contract as PsVScrollBar/PsStatusBar/PsTabBar.
     SetWindowLongPtr( hForm, GWLP_ID, CtrlID )
     ' Enable double-click messages (WM_LBUTTONDBLCLK) on the container's window
     ' class, preserving the class's existing styles rather than replacing them.
     pWindow->ClassStyle = pWindow->ClassStyle or CS_DBLCLKS
 
     ' Define the TYPE that holds all the information about this custom listbox.
-    dim as CLISTBOX ptr pList = new CLISTBOX
+    dim as PSLISTBOX ptr pList = new PSLISTBOX
     pList->hWin = hForm
     pList->idc_ListBox = CtrlID
     
@@ -2055,14 +2055,14 @@ function CListBox_Create( byval hWndParent as HWND, byval CtrlID as integer ) as
     ' A WSTRING, not a bare literal: fbc string literals are ASCII, so @"..." yields a
     ' zstring ptr where lpszClassName wants an LPCWSTR -- which compiles with only a
     ' "suspicious pointer assignment" warning and then registers a garbage class name.
-    static as wstring * 32 wszSurfClass = "CListBoxSurface_Class"
+    static as wstring * 32 wszSurfClass = "PsListBoxSurface_Class"
 
     static as boolean bClassRegistered = false
     if bClassRegistered = false then
         dim as WNDCLASSEXW wc
         wc.cbSize        = sizeof(WNDCLASSEXW)
         wc.style         = CS_DBLCLKS
-        wc.lpfnWndProc   = @CListBoxSurface_WndProc
+        wc.lpfnWndProc   = @PsListBoxSurface_WndProc
         wc.hInstance     = GetModuleHandleW( NULL )
         wc.hCursor       = LoadCursorW( NULL, cast(LPCWSTR, IDC_ARROW) )
         ' No background brush: the surface paints its entire client in WM_PAINT, and a
@@ -2077,20 +2077,20 @@ function CListBox_Create( byval hWndParent as HWND, byval CtrlID as integer ) as
             WS_CHILD or WS_VISIBLE or WS_CLIPSIBLINGS or WS_TABSTOP, _
             0, 0, 0, 0, hForm, cast(HMENU, cast(LONG_PTR, pList->idc_ListBox)), _
             GetModuleHandleW( NULL ), NULL )
-    pList->hTooltip = CListBox_AddTooltip( hList )
+    pList->hTooltip = PsListBox_AddTooltip( hList )
 
     ' Owner-drawn vertical scrollbar, owned and driven by this control. It starts
     ' hidden; the first Refresh/Sync decides whether there is anything to scroll.
-    pList->hScrollBar = CVScrollBar_Create( hForm, CtrlID + 1 )
-    CVScrollBar_SetScrollCallback( pList->hScrollBar, @CListBox_OnScrollBarScroll )
+    pList->hScrollBar = PsVScrollBar_Create( hForm, CtrlID + 1 )
+    PsVScrollBar_SetScrollCallback( pList->hScrollBar, @PsListBox_OnScrollBarScroll )
 
     ' Optional column header band, owned by this control. Starts hidden
-    ' (CListBox_ShowHeader turns it on); columns can be defined regardless --
+    ' (PsListBox_ShowHeader turns it on); columns can be defined regardless --
     ' PositionWindows keeps the window sized even while hidden so its column layout
     ' is always derivable. The WidthChanged slot is this control's chain hook; hosts
-    ' subscribe through CListBox_SetColumnResizeCallback.
-    pList->hHeader = CColumnHeader_Create( hForm, CtrlID + 2 )
-    CColumnHeader_SetWidthChangedCallback( pList->hHeader, @CListBox_OnHeaderWidthChanged )
+    ' subscribe through PsListBox_SetColumnResizeCallback.
+    pList->hHeader = PsColumnHeader_Create( hForm, CtrlID + 2 )
+    PsColumnHeader_SetWidthChangedCallback( pList->hHeader, @PsListBox_OnHeaderWidthChanged )
 
     function = hForm
 

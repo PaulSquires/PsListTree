@@ -1,12 +1,12 @@
 #include once "frmMain.bi"
-#include once "CBufferPaint.bi"
+#include once "PsBufferPaint.bi"
 
 
 ' ========================================================================================
 ' Process WM_PAINT message for window/dialog: frmMain
 ' ========================================================================================
 function frmMain_OnPaint( byval hwnd as HWND ) as LRESULT
-    dim as CBufferPaint b
+    dim as PsBufferPaint b
 
     b.BeginDoubleBuffer(hwnd)
     b.SetBackColor( theme.BackColorPanel )
@@ -109,9 +109,9 @@ end Function
 dim shared gCellTraceDone as boolean = false
 
 ' ========================================================================================
-' CListBox_PaintCallback
+' PsListBox_PaintCallback
 ' ========================================================================================
-sub CListBox_PaintCallback( byval p as CLISTBOX_PAINTINFO ptr )
+sub PsListBox_PaintCallback( byval p as PSLISTBOX_PAINTINFO ptr )
 
     ' State priority for the row background/foreground: selected > hot > normal
     dim as COLORREF backclr, foreclr
@@ -150,7 +150,7 @@ sub CListBox_PaintCallback( byval p as CLISTBOX_PAINTINFO ptr )
             next
             print s
         end if
-        dim as integer pad = CColumnHeader_GetPadding( HWND_COLHDR )
+        dim as integer pad = PsColumnHeader_GetPadding( HWND_COLHDR )
         p->b->SetFont( ghFont(GUIFONT_10) )
         for c as integer = 0 to p->columnCount - 1
             dim as RECT rcCell = p->cells[c].rc
@@ -218,7 +218,7 @@ end function
 ' ========================================================================================
 sub Demo_SortInstanceB()
     dim as HWND h = HWND_FRMEXPLORER2
-    dim as integer n = CListBox_GetCount( h )
+    dim as integer n = PsListBox_GetCount( h )
     if n <= 0 then return
 
     redim as boolean isHdr( 0 to n - 1 )
@@ -226,12 +226,12 @@ sub Demo_SortInstanceB()
     redim as string  c0( 0 to n - 1 ), c1( 0 to n - 1 ), c2( 0 to n - 1 )
     redim as integer dat( 0 to n - 1 )
     for i as integer = 0 to n - 1
-        isHdr(i) = CListBox_IsHeader( h, i )
-        isCol(i) = CListBox_IsCollapsed( h, i )
-        c0(i) = CListBox_GetCellText( h, i, 0 )
-        c1(i) = CListBox_GetCellText( h, i, 1 )
-        c2(i) = CListBox_GetCellText( h, i, 2 )
-        dat(i) = CListBox_GetItemData( h, i )
+        isHdr(i) = PsListBox_IsHeader( h, i )
+        isCol(i) = PsListBox_IsCollapsed( h, i )
+        c0(i) = PsListBox_GetCellText( h, i, 0 )
+        c1(i) = PsListBox_GetCellText( h, i, 1 )
+        c2(i) = PsListBox_GetCellText( h, i, 2 )
+        dat(i) = PsListBox_GetItemData( h, i )
     next
 
     ' Insertion-sort each header's item run in place.
@@ -266,27 +266,27 @@ sub Demo_SortInstanceB()
         i = last
     wend
 
-    CListBox_BeginUpdate( h )
-    CListBox_Clear( h )
+    PsListBox_BeginUpdate( h )
+    PsListBox_Clear( h )
     for i as integer = 0 to n - 1
         dim as integer r
         if isHdr(i) then
-            r = CListBox_AddHeader( h, c0(i), dat(i) )
-            if isCol(i) then CListBox_CollapseRow( h, r )
+            r = PsListBox_AddHeader( h, c0(i), dat(i) )
+            if isCol(i) then PsListBox_CollapseRow( h, r )
         else
-            r = CListBox_AddString( h, c0(i), dat(i) )
-            if len(c1(i)) > 0 then CListBox_SetCellText( h, r, 1, c1(i) )
-            if len(c2(i)) > 0 then CListBox_SetCellText( h, r, 2, c2(i) )
+            r = PsListBox_AddString( h, c0(i), dat(i) )
+            if len(c1(i)) > 0 then PsListBox_SetCellText( h, r, 1, c1(i) )
+            if len(c2(i)) > 0 then PsListBox_SetCellText( h, r, 2, c2(i) )
         end if
     next
-    CListBox_EndUpdate( h )
+    PsListBox_EndUpdate( h )
 end sub
 
 
 ' ========================================================================================
-' Header_PaintCallback -- demo painter for the CColumnHeader band (per-column)
+' Header_PaintCallback -- demo painter for the PsColumnHeader band (per-column)
 ' ========================================================================================
-sub Header_PaintCallback( byval p as CCOLUMNHEADER_PAINTINFO ptr )
+sub Header_PaintCallback( byval p as PSCOLUMNHEADER_PAINTINFO ptr )
 
     ' State priority for the cell background/foreground: pressed > hot > normal
     dim as COLORREF backclr, foreclr
@@ -305,7 +305,7 @@ sub Header_PaintCallback( byval p as CCOLUMNHEADER_PAINTINFO ptr )
 
     ' Caption, inset by the control's padding (the space the layout accounts for)
     dim as RECT rcText = p->rc
-    dim as integer pad = CColumnHeader_GetPadding( p->hHeader )
+    dim as integer pad = PsColumnHeader_GetPadding( p->hHeader )
     rcText.left += pad
     rcText.right -= pad
     p->b->SetFont( ghFont(GUIFONTBOLD_10) )
@@ -361,21 +361,21 @@ sub Header_ClickCallback( byval hHeader as HWND, byval idx as integer )
     if gSortAsc then s &= "asc" else s &= "desc"
     print s
     Demo_SortInstanceB()
-    CColumnHeader_Refresh( hHeader )   ' repaint the sort glyph
+    PsColumnHeader_Refresh( hHeader )   ' repaint the sort glyph
 end sub
 
 function Header_AutoSizeCallback( byval hHeader as HWND, byval idx as integer ) as integer
     ' Demo best-fit: measure the column CAPTION with the header font + 2*padding. (A
     ' real host measures its widest cell; the standalone header has no cell data.)
     dim as integer bestW = 0
-    dim as DWSTRING wszText = CColumnHeader_GetColumnText( hHeader, idx )
+    dim as DWSTRING wszText = PsColumnHeader_GetColumnText( hHeader, idx )
     dim as HDC hDC = GetDC( hHeader )
     dim as HFONT hOldFont = SelectObject( hDC, ghFont(GUIFONTBOLD_10) )
     dim as SIZE sz
     if GetTextExtentPoint32W( hDC, wszText.vptr, len(wszText), @sz ) then bestW = sz.cx
     SelectObject( hDC, hOldFont )
     ReleaseDC( hHeader, hDC )
-    if bestW > 0 then bestW += CColumnHeader_GetPadding( hHeader ) * 2
+    if bestW > 0 then bestW += PsColumnHeader_GetPadding( hHeader ) * 2
     dim as string s = "header autosize col=" & str(idx) & " -> " & str(bestW)
     print s
     return bestW
@@ -383,12 +383,12 @@ end function
 
 
 ' ========================================================================================
-' Geometry/contract self-test (run with CLISTBOX_SELFTEST=1). Asserts the column rect
+' Geometry/contract self-test (run with PSLISTBOX_SELFTEST=1). Asserts the column rect
 ' math, divider hit zones, and the painted cell contract -- captured from the REAL
-' paint path, never re-derived (CHScrollBar's self-test pattern).
+' paint path, never re-derived (PsHScrollBar's self-test pattern).
 ' ========================================================================================
 dim shared gFailCount as integer = 0
-dim shared gSelfTestCells(any) as CLISTBOX_CELLINFO
+dim shared gSelfTestCells(any) as PSLISTBOX_CELLINFO
 dim shared gSelfTestCellCount as integer = -1     ' -1 = capture never ran
 ' The row's OWN rect, captured alongside its cells. Rows are painted in the surface's
 ' client coordinates now, so "where is this row" is no longer a constant the test can
@@ -421,7 +421,7 @@ end sub
 
 ' Swapped-in row paint callback: copies the requested model row's column info out of
 ' the live PAINTINFO (the pointer is only valid during the call, so deep-copy).
-sub SelfTest_RowCapturePaint( byval p as CLISTBOX_PAINTINFO ptr )
+sub SelfTest_RowCapturePaint( byval p as PSLISTBOX_PAINTINFO ptr )
     if (gSelfTestWantRow <> -2) andalso (p->itemID <> gSelfTestWantRow) then exit sub
     gSelfTestCellCount   = p->columnCount
     gSelfTestRowIsHeader = p->isHeader
@@ -449,15 +449,15 @@ sub frmMain_RunSelfTest()
     dim pWindow as CWindow ptr = AfxCWindowPtr( hHdr )
 
     print ""
-    print "=== CListBox columns/header self-test ==="
+    print "=== PsListBox columns/header self-test ==="
 
     ' ---- 1. Column rect math (widths 160 / 70 / fill on the live client width) ----
     dim as RECT rcC : GetClientRect( hHdr, @rcC )
     dim as integer clientW = rcC.right - rcC.left
     dim as RECT rc0, rc1, rc2
-    CColumnHeader_GetColumnRect( hHdr, 0, rc0 )
-    CColumnHeader_GetColumnRect( hHdr, 1, rc1 )
-    CColumnHeader_GetColumnRect( hHdr, 2, rc2 )
+    PsColumnHeader_GetColumnRect( hHdr, 0, rc0 )
+    PsColumnHeader_GetColumnRect( hHdr, 1, rc1 )
+    PsColumnHeader_GetColumnRect( hHdr, 2, rc2 )
     SelfTest_Check( "col0 = [0..160]", (rc0.left = 0) andalso (rc0.right = 160), _
         "l=" & str(rc0.left) & " r=" & str(rc0.right) )
     SelfTest_Check( "col1 = [160..230]", (rc1.left = 160) andalso (rc1.right = 230), _
@@ -471,39 +471,39 @@ sub frmMain_RunSelfTest()
     dim as integer minDefault = CCOLHDR_DEFAULT_MINWIDTH
     if pWindow then minDefault = pWindow->ScaleX( CCOLHDR_DEFAULT_MINWIDTH )
     dim as integer notifyBefore = gResizeNotifyCount
-    CListBox_SetColumnWidth( hB, 1, 5 )
+    PsListBox_SetColumnWidth( hB, 1, 5 )
     SelfTest_Check( "SetColumnWidth clamps to scaled min", _
-        (CListBox_GetColumnWidth( hB, 1 ) = minDefault), _
-        "w=" & str(CListBox_GetColumnWidth( hB, 1 )) & " min=" & str(minDefault) )
+        (PsListBox_GetColumnWidth( hB, 1 ) = minDefault), _
+        "w=" & str(PsListBox_GetColumnWidth( hB, 1 )) & " min=" & str(minDefault) )
     SelfTest_Check( "programmatic width change is silent", _
         (gResizeNotifyCount = notifyBefore), _
         "notifies=" & str(gResizeNotifyCount - notifyBefore) )
-    CListBox_SetColumnWidth( hB, 1, 70 )    ' restore
+    PsListBox_SetColumnWidth( hB, 1, 70 )    ' restore
 
     ' ---- 3. Divider hit zones: boundary +/- gutter hits, one past misses, and the
     '         fill column's own divider is never grabbable ----
     dim as integer gutter = CCOLHDR_DIVIDER_GUTTER
     if pWindow then gutter = pWindow->ScaleX( CCOLHDR_DIVIDER_GUTTER )
-    CColumnHeader_GetColumnRect( hHdr, 0, rc0 )
-    CColumnHeader_GetColumnRect( hHdr, 2, rc2 )
+    PsColumnHeader_GetColumnRect( hHdr, 0, rc0 )
+    PsColumnHeader_GetColumnRect( hHdr, 2, rc2 )
     dim as integer bx = rc0.right
     dim as integer midY = (rcC.bottom - rcC.top) \ 2
     SelfTest_Check( "divider hits at boundary", _
-        (CColumnHeader_HitTestDivider( hHdr, bx, midY ) = 0), "x=" & str(bx) )
+        (PsColumnHeader_HitTestDivider( hHdr, bx, midY ) = 0), "x=" & str(bx) )
     SelfTest_Check( "divider hits at boundary-gutter", _
-        (CColumnHeader_HitTestDivider( hHdr, bx - gutter, midY ) = 0), "x=" & str(bx - gutter) )
+        (PsColumnHeader_HitTestDivider( hHdr, bx - gutter, midY ) = 0), "x=" & str(bx - gutter) )
     SelfTest_Check( "divider hits at boundary+gutter", _
-        (CColumnHeader_HitTestDivider( hHdr, bx + gutter, midY ) = 0), "x=" & str(bx + gutter) )
+        (PsColumnHeader_HitTestDivider( hHdr, bx + gutter, midY ) = 0), "x=" & str(bx + gutter) )
     SelfTest_Check( "no divider at boundary-(gutter+1)", _
-        (CColumnHeader_HitTestDivider( hHdr, bx - gutter - 1, midY ) = -1), "x=" & str(bx - gutter - 1) )
+        (PsColumnHeader_HitTestDivider( hHdr, bx - gutter - 1, midY ) = -1), "x=" & str(bx - gutter - 1) )
     SelfTest_Check( "no divider at boundary+(gutter+1)", _
-        (CColumnHeader_HitTestDivider( hHdr, bx + gutter + 1, midY ) = -1), "x=" & str(bx + gutter + 1) )
+        (PsColumnHeader_HitTestDivider( hHdr, bx + gutter + 1, midY ) = -1), "x=" & str(bx + gutter + 1) )
     SelfTest_Check( "fill column's divider not grabbable", _
-        (CColumnHeader_HitTestDivider( hHdr, rc2.right, midY ) = -1), "x=" & str(rc2.right) )
+        (PsColumnHeader_HitTestDivider( hHdr, rc2.right, midY ) = -1), "x=" & str(rc2.right) )
 
     ' ---- 4. Painted cells: captured from the real paint path, equal to the
     '         header's rects, y spanning the row height; sparse cells read empty ----
-    CListBox_SetPaintCallback( hB, @SelfTest_RowCapturePaint )
+    PsListBox_SetPaintCallback( hB, @SelfTest_RowCapturePaint )
     if SelfTest_GrabRow( hB, 1 ) then
         SelfTest_Check( "item row captures columnCount=3", (gSelfTestCellCount = 3), _
             "n=" & str(gSelfTestCellCount) )
@@ -511,7 +511,7 @@ sub frmMain_RunSelfTest()
             dim as boolean okX = true
             dim as RECT rcH
             for c as integer = 0 to 2
-                CColumnHeader_GetColumnRect( hHdr, c, rcH )
+                PsColumnHeader_GetColumnRect( hHdr, c, rcH )
                 if (gSelfTestCells(c).rc.left <> rcH.left) orelse (gSelfTestCells(c).rc.right <> rcH.right) then okX = false
             next
             SelfTest_Check( "cell x-spans == header rects", okX, _
@@ -541,11 +541,11 @@ sub frmMain_RunSelfTest()
         SelfTest_Check( "paint captured (item row)", false, "the row paint callback never ran" )
     end if
     SelfTest_Check( "sparse folder Size cell reads empty", _
-        (len(CListBox_GetCellText( hB, 43, 1 )) = 0), _
-        "len=" & str(len(CListBox_GetCellText( hB, 43, 1 ))) )
+        (len(PsListBox_GetCellText( hB, 43, 1 )) = 0), _
+        "len=" & str(len(PsListBox_GetCellText( hB, 43, 1 ))) )
 
     ' ---- 5. A width change reflows the painted cells ----
-    CListBox_SetColumnWidth( hB, 0, 150 )
+    PsListBox_SetColumnWidth( hB, 0, 150 )
     if SelfTest_GrabRow( hB, 1 ) then
         dim as boolean okW = (gSelfTestCellCount = 3)
         if okW then okW = (gSelfTestCells(1).rc.left = 150)
@@ -554,7 +554,7 @@ sub frmMain_RunSelfTest()
     else
         SelfTest_Check( "paint captured (width reflow)", false, "the row paint callback never ran" )
     end if
-    CListBox_SetColumnWidth( hB, 0, 160 )   ' restore
+    PsListBox_SetColumnWidth( hB, 0, 160 )   ' restore
 
     ' ---- 6. Group-header rows span the full width (columnCount = 0) ----
     if SelfTest_GrabRow( hB, 0 ) then
@@ -567,7 +567,7 @@ sub frmMain_RunSelfTest()
     end if
 
     ' ---- 7. Instance A (no columns): the pre-columns contract, proven not assumed ----
-    CListBox_SetPaintCallback( HWND_FRMEXPLORER, @SelfTest_RowCapturePaint )
+    PsListBox_SetPaintCallback( HWND_FRMEXPLORER, @SelfTest_RowCapturePaint )
     if SelfTest_GrabRow( HWND_FRMEXPLORER, -2 ) then
         SelfTest_Check( "no-columns instance captures columnCount=0", _
             (gSelfTestCellCount = 0), "n=" & str(gSelfTestCellCount) )
@@ -578,17 +578,17 @@ sub frmMain_RunSelfTest()
     ' ---- 7b. SelChange: fires for user-driven moves ONLY, and never twice for the same
     '          row. The keyboard case is the reason the callback exists at all -- the
     '          control consumes WM_KEYDOWN, so nothing else can observe arrow navigation.
-    CListBox_SetSelChangeCallback( hB, @SelfTest_SelChange )
+    PsListBox_SetSelChangeCallback( hB, @SelfTest_SelChange )
     dim as HWND hInner = GetDlgItem( hB, IDC_FRMMAIN_LISTBOX )
 
     gSelChangeCount = 0
-    CListBox_SetCurSel( hB, 2 )
+    PsListBox_SetCurSel( hB, 2 )
     SelfTest_Check( "SetCurSel is silent", (gSelChangeCount = 0), _
         "fires=" & str(gSelChangeCount) )
 
     gSelChangeCount = 0
     SendMessage( hInner, WM_KEYDOWN, VK_DOWN, 0 )
-    dim as integer rowAfterDown = CListBox_GetCurSel( hB )
+    dim as integer rowAfterDown = PsListBox_GetCurSel( hB )
     SelfTest_Check( "VK_DOWN fires exactly once", (gSelChangeCount = 1), _
         "fires=" & str(gSelChangeCount) )
     SelfTest_Check( "SelChange row = GetCurSel", (gSelChangeRow = rowAfterDown), _
@@ -603,19 +603,19 @@ sub frmMain_RunSelfTest()
 
     ' Re-setting the row that is already current must stay silent.
     gSelChangeCount = 0
-    CListBox_SetCurSel( hB, CListBox_GetCurSel( hB ) )
+    PsListBox_SetCurSel( hB, PsListBox_GetCurSel( hB ) )
     SelfTest_Check( "SetCurSel to the current row is silent", (gSelChangeCount = 0), _
         "fires=" & str(gSelChangeCount) )
 
     ' Clamped navigation does not move the focus, so it must not notify either.
-    CListBox_SetCurSel( hB, 0 )
+    PsListBox_SetCurSel( hB, 0 )
     gSelChangeCount = 0
     SendMessage( hInner, WM_KEYDOWN, VK_UP, 0 )
     SelfTest_Check( "VK_UP clamped at the top is silent", (gSelChangeCount = 0), _
-        "fires=" & str(gSelChangeCount) & " row=" & str(CListBox_GetCurSel(hB)) )
+        "fires=" & str(gSelChangeCount) & " row=" & str(PsListBox_GetCurSel(hB)) )
 
     ' A host that never sets the callback must be unaffected.
-    CListBox_SetSelChangeCallback( hB, 0 )
+    PsListBox_SetSelChangeCallback( hB, 0 )
     gSelChangeCount = 0
     SendMessage( hInner, WM_KEYDOWN, VK_DOWN, 0 )
     SelfTest_Check( "cleared callback stops firing", (gSelChangeCount = 0), _
@@ -623,17 +623,17 @@ sub frmMain_RunSelfTest()
 
     ' ---- 8. DESTRUCTIVE (last): column delete/insert shift the per-row cells across
     '         the Text<->cells(0) alias, and the fill designation self-heals ----
-    CListBox_DeleteColumn( hB, 2 )
+    PsListBox_DeleteColumn( hB, 2 )
     SelfTest_Check( "delete fill col -> effective fill = last (1)", _
-        (CListBox_GetFillColumn( hB ) = 1), "fill=" & str(CListBox_GetFillColumn( hB )) )
+        (PsListBox_GetFillColumn( hB ) = 1), "fill=" & str(PsListBox_GetFillColumn( hB )) )
     SelfTest_Check( "deleted column's cells removed", _
-        (len(CListBox_GetCellText( hB, 1, 2 )) = 0), _
-        "len=" & str(len(CListBox_GetCellText( hB, 1, 2 ))) )
-    dim as string sSize = CListBox_GetCellText( hB, 1, 1 )
+        (len(PsListBox_GetCellText( hB, 1, 2 )) = 0), _
+        "len=" & str(len(PsListBox_GetCellText( hB, 1, 2 ))) )
+    dim as string sSize = PsListBox_GetCellText( hB, 1, 1 )
     SelfTest_Check( "cells before the deleted column survive", (sSize = "137"), "c1=" & sSize )
-    CListBox_InsertColumn( hB, 0, "Icon", 40 )
-    dim as string sShift0 = CListBox_GetCellText( hB, 1, 0 )
-    dim as string sShift1 = CListBox_GetCellText( hB, 1, 1 )
+    PsListBox_InsertColumn( hB, 0, "Icon", 40 )
+    dim as string sShift0 = PsListBox_GetCellText( hB, 1, 0 )
+    dim as string sShift1 = PsListBox_GetCellText( hB, 1, 1 )
     dim as boolean okIns = (len(sShift0) = 0) andalso (sShift1 = "file0.bas")
     SelfTest_Check( "insert at 0 shifts Text into column 1", okIns, _
         "c0len=" & str(len(sShift0)) & " c1=" & sShift1 )
@@ -643,9 +643,9 @@ end sub
 
 
 ' ========================================================================================
-' CListBox_MessageCallback
+' PsListBox_MessageCallback
 ' ========================================================================================
-function CListBox_MessageCallback( byval m as CLISTBOX_MESSAGEINFO ptr ) as boolean
+function PsListBox_MessageCallback( byval m as PSLISTBOX_MESSAGEINFO ptr ) as boolean
 
     select case m->uMsg
              
@@ -663,9 +663,9 @@ function CListBox_MessageCallback( byval m as CLISTBOX_MESSAGEINFO ptr ) as bool
             dim as HWND hCtl = GetParent(m->hList)
             ' plain string, not DWSTRING: print interleaves wide chars
             dim as string sKind = "item"
-            if CListBox_IsHeader( hCtl, m->idx ) then sKind = "HEADER"
+            if PsListBox_IsHeader( hCtl, m->idx ) then sKind = "HEADER"
             print "click row" & str(m->idx) & " (" & sKind & ")  focus=" & _
-                  str(CListBox_GetCurSel(hCtl)) & "  selCount=" & str(CListBox_GetSelCount(hCtl))
+                  str(PsListBox_GetCurSel(hCtl)) & "  selCount=" & str(PsListBox_GetSelCount(hCtl))
             ' Header collapse/expand is handled inside the control on the mouse-down,
             ' and it preserves the current selection. Return FALSE: the listbox needs
             ' its default WM_LBUTTONUP handling to release the mouse capture it took
@@ -680,13 +680,13 @@ end function
 
 
 ' ========================================================================================
-' CListBox_TooltipCallback  -- per-row tooltip text, resolved on demand
+' PsListBox_TooltipCallback  -- per-row tooltip text, resolved on demand
 ' ========================================================================================
-function CListBox_TooltipCallback( byval hCtl as HWND, byval row as integer ) as DWSTRING
-    if CListBox_IsHeader( hCtl, row ) then
-        return "Group header: " & CListBox_GetText( hCtl, row )
+function PsListBox_TooltipCallback( byval hCtl as HWND, byval row as integer ) as DWSTRING
+    if PsListBox_IsHeader( hCtl, row ) then
+        return "Group header: " & PsListBox_GetText( hCtl, row )
     end if
-    return "Row " & row & " -> " & CListBox_GetText( hCtl, row )
+    return "Row " & row & " -> " & PsListBox_GetText( hCtl, row )
 end function
 
 
@@ -716,84 +716,84 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
     dim as long halfW = rc.right \ 2
 
     ' ---- Instance A (left half): many rows -- exercises scrolling ----
-    HWND_FRMEXPLORER = CListBox_Create( HWND_FRMMAIN, IDC_FRMMAIN_LISTBOX )
+    HWND_FRMEXPLORER = PsListBox_Create( HWND_FRMMAIN, IDC_FRMMAIN_LISTBOX )
     SetWindowPos( HWND_FRMEXPLORER, 0, _
         rc.left, rc.top, halfW, rc.bottom, _
         SWP_NOZORDER or SWP_SHOWWINDOW )
-    CListBox_SetPaintCallback( HWND_FRMEXPLORER, @CListBox_PaintCallback )
-    CListBox_SetMessageCallback( HWND_FRMEXPLORER, @CListBox_MessageCallback )
-    CListBox_SetBackColor( HWND_FRMEXPLORER, theme.BackColor )
-    CListBox_SetFont( HWND_FRMEXPLORER, ghFont(GUIFONT_10) )
-    CListBox_SetTooltipCallback( HWND_FRMEXPLORER, @CListBox_TooltipCallback )
-    CListBox_SetExtendedSelect( HWND_FRMEXPLORER, true )   ' Shift/Ctrl range selection
+    PsListBox_SetPaintCallback( HWND_FRMEXPLORER, @PsListBox_PaintCallback )
+    PsListBox_SetMessageCallback( HWND_FRMEXPLORER, @PsListBox_MessageCallback )
+    PsListBox_SetBackColor( HWND_FRMEXPLORER, theme.BackColor )
+    PsListBox_SetFont( HWND_FRMEXPLORER, ghFont(GUIFONT_10) )
+    PsListBox_SetTooltipCallback( HWND_FRMEXPLORER, @PsListBox_TooltipCallback )
+    PsListBox_SetExtendedSelect( HWND_FRMEXPLORER, true )   ' Shift/Ctrl range selection
     ' The scrollbar is created/positioned/auto-hidden by the control; we only theme it.
-    ' (CListBox_SetScrollBarPaintCallback is available for full custom drawing.)
-    CListBox_SetScrollBarColors( HWND_FRMEXPLORER, theme.BackColorScrollBar, _
+    ' (PsListBox_SetScrollBarPaintCallback is available for full custom drawing.)
+    PsListBox_SetScrollBarColors( HWND_FRMEXPLORER, theme.BackColorScrollBar, _
                                  theme.ForeColorScrollBar, theme.ForeColorScrollBarHot )
     ' Two groups; bulk add is batched so the map rebuilds once, not per row.
-    CListBox_BeginUpdate( HWND_FRMEXPLORER )
-    CListBox_AddHeader( HWND_FRMEXPLORER, "Group Alpha" )
+    PsListBox_BeginUpdate( HWND_FRMEXPLORER )
+    PsListBox_AddHeader( HWND_FRMEXPLORER, "Group Alpha" )
     for i as integer = 0 to 20
-        CListBox_AddString( HWND_FRMEXPLORER, "Alpha item " & i, 1000 + i )
+        PsListBox_AddString( HWND_FRMEXPLORER, "Alpha item " & i, 1000 + i )
     next
-    CListBox_AddHeader( HWND_FRMEXPLORER, "Group Beta" )
+    PsListBox_AddHeader( HWND_FRMEXPLORER, "Group Beta" )
     for i as integer = 0 to 20
-        CListBox_AddString( HWND_FRMEXPLORER, "Beta item " & i, 2000 + i )
+        PsListBox_AddString( HWND_FRMEXPLORER, "Beta item " & i, 2000 + i )
     next
-    CListBox_EndUpdate( HWND_FRMEXPLORER )
-    CListBox_SetCurSel( HWND_FRMEXPLORER, 1 )
+    PsListBox_EndUpdate( HWND_FRMEXPLORER )
+    PsListBox_SetCurSel( HWND_FRMEXPLORER, 1 )
 
     ' ---- Instance B (right half): a couple of small groups, one starting
     ' collapsed, PLUS the embedded column header band. Tests: per-instance hover
     ' (must not affect A), empty client-area painting below the last row, collapse
     ' hiding a group's items, and the header/columns integration. ----
-    HWND_FRMEXPLORER2 = CListBox_Create( HWND_FRMMAIN, IDC_FRMMAIN_LISTBOX )
+    HWND_FRMEXPLORER2 = PsListBox_Create( HWND_FRMMAIN, IDC_FRMMAIN_LISTBOX )
     SetWindowPos( HWND_FRMEXPLORER2, 0, _
         halfW, rc.top, rc.right - halfW, rc.bottom, _
         SWP_NOZORDER or SWP_SHOWWINDOW )
-    CListBox_SetPaintCallback( HWND_FRMEXPLORER2, @CListBox_PaintCallback )
-    CListBox_SetMessageCallback( HWND_FRMEXPLORER2, @CListBox_MessageCallback )
-    CListBox_SetBackColor( HWND_FRMEXPLORER2, theme.BackColor )
-    CListBox_SetFont( HWND_FRMEXPLORER2, ghFont(GUIFONT_10) )
-    CListBox_SetTooltipCallback( HWND_FRMEXPLORER2, @CListBox_TooltipCallback )
-    CListBox_SetScrollBarColors( HWND_FRMEXPLORER2, theme.BackColorScrollBar, _
+    PsListBox_SetPaintCallback( HWND_FRMEXPLORER2, @PsListBox_PaintCallback )
+    PsListBox_SetMessageCallback( HWND_FRMEXPLORER2, @PsListBox_MessageCallback )
+    PsListBox_SetBackColor( HWND_FRMEXPLORER2, theme.BackColor )
+    PsListBox_SetFont( HWND_FRMEXPLORER2, ghFont(GUIFONT_10) )
+    PsListBox_SetTooltipCallback( HWND_FRMEXPLORER2, @PsListBox_TooltipCallback )
+    PsListBox_SetScrollBarColors( HWND_FRMEXPLORER2, theme.BackColorScrollBar, _
                                  theme.ForeColorScrollBar, theme.ForeColorScrollBarHot )
     ' B uses the OTHER selection mode, so the harness covers both.
-    CListBox_SetMultiSelect( HWND_FRMEXPLORER2, true )     ' checklist style: click toggles
-    CListBox_BeginUpdate( HWND_FRMEXPLORER2 )
-    CListBox_AddHeader( HWND_FRMEXPLORER2, "Files" )              ' model row 0
+    PsListBox_SetMultiSelect( HWND_FRMEXPLORER2, true )     ' checklist style: click toggles
+    PsListBox_BeginUpdate( HWND_FRMEXPLORER2 )
+    PsListBox_AddHeader( HWND_FRMEXPLORER2, "Files" )              ' model row 0
     for i as integer = 0 to 40
-        dim as integer r = CListBox_AddString( HWND_FRMEXPLORER2, "file" & i & ".bas", i )
+        dim as integer r = PsListBox_AddString( HWND_FRMEXPLORER2, "file" & i & ".bas", i )
         ' Columns 1/2 (Size/Type); column 0 is the AddString text itself.
-        CListBox_SetCellText( HWND_FRMEXPLORER2, r, 1, str( (i + 1) * 137 ) )
-        CListBox_SetCellText( HWND_FRMEXPLORER2, r, 2, "FreeBASIC source" )
+        PsListBox_SetCellText( HWND_FRMEXPLORER2, r, 1, str( (i + 1) * 137 ) )
+        PsListBox_SetCellText( HWND_FRMEXPLORER2, r, 2, "FreeBASIC source" )
     next
-    CListBox_AddHeader( HWND_FRMEXPLORER2, "Folders" )           ' model row 42
+    PsListBox_AddHeader( HWND_FRMEXPLORER2, "Folders" )           ' model row 42
     for i as integer = 0 to 4
-        dim as integer r = CListBox_AddString( HWND_FRMEXPLORER2, "folder" & i, i )
+        dim as integer r = PsListBox_AddString( HWND_FRMEXPLORER2, "folder" & i, i )
         ' Size stays "" (sparse cells) -- proves never-set cells paint as empty.
-        CListBox_SetCellText( HWND_FRMEXPLORER2, r, 2, "Folder" )
+        PsListBox_SetCellText( HWND_FRMEXPLORER2, r, 2, "Folder" )
     next
-    CListBox_EndUpdate( HWND_FRMEXPLORER2 )
+    PsListBox_EndUpdate( HWND_FRMEXPLORER2 )
     ' Start the "Folders" group collapsed. (Was CollapseRow(6) -- comment rot from when
     ' the file loop added 5 rows; row 6 is a file item now, so that call was a silent
     ' no-op and the group never started collapsed.)
-    CListBox_CollapseRow( HWND_FRMEXPLORER2, 42 )
+    PsListBox_CollapseRow( HWND_FRMEXPLORER2, 42 )
 
     ' ---- Embedded column header on instance B (phase 3). Columns are defined through
-    ' the CListBox wrappers; the header child is the store. Host callbacks go through
+    ' the PsListBox wrappers; the header child is the store. Host callbacks go through
     ' the wrappers too -- the resize slot on the child itself belongs to the control. ----
-    CListBox_AddColumn( HWND_FRMEXPLORER2, "Name", 160 )
-    CListBox_AddColumn( HWND_FRMEXPLORER2, "Size", 70 )
-    CListBox_AddColumn( HWND_FRMEXPLORER2, "Type" )    ' fill column (default: last)
-    CListBox_SetHeaderPaintCallback( HWND_FRMEXPLORER2, @Header_PaintCallback )
-    CListBox_SetHeaderBackColor( HWND_FRMEXPLORER2, theme.BackColorScrollBar )
-    CListBox_SetHeaderFont( HWND_FRMEXPLORER2, ghFont(GUIFONTBOLD_10) )
-    CListBox_SetColumnResizeCallback( HWND_FRMEXPLORER2, @Header_WidthChangedCallback )
-    CListBox_SetColumnClickCallback( HWND_FRMEXPLORER2, @Header_ClickCallback )
-    CListBox_SetColumnAutoSizeCallback( HWND_FRMEXPLORER2, @Header_AutoSizeCallback )
-    CListBox_ShowHeader( HWND_FRMEXPLORER2, true )
-    HWND_COLHDR = CListBox_GetHeader( HWND_FRMEXPLORER2 )
+    PsListBox_AddColumn( HWND_FRMEXPLORER2, "Name", 160 )
+    PsListBox_AddColumn( HWND_FRMEXPLORER2, "Size", 70 )
+    PsListBox_AddColumn( HWND_FRMEXPLORER2, "Type" )    ' fill column (default: last)
+    PsListBox_SetHeaderPaintCallback( HWND_FRMEXPLORER2, @Header_PaintCallback )
+    PsListBox_SetHeaderBackColor( HWND_FRMEXPLORER2, theme.BackColorScrollBar )
+    PsListBox_SetHeaderFont( HWND_FRMEXPLORER2, ghFont(GUIFONTBOLD_10) )
+    PsListBox_SetColumnResizeCallback( HWND_FRMEXPLORER2, @Header_WidthChangedCallback )
+    PsListBox_SetColumnClickCallback( HWND_FRMEXPLORER2, @Header_ClickCallback )
+    PsListBox_SetColumnAutoSizeCallback( HWND_FRMEXPLORER2, @Header_AutoSizeCallback )
+    PsListBox_ShowHeader( HWND_FRMEXPLORER2, true )
+    HWND_COLHDR = PsListBox_GetHeader( HWND_FRMEXPLORER2 )
 
     ' ---- Geometry gates (numeric, asserted, never eyeballed) ----
     ' 1) Column rects: contiguous from 0, fill column's right edge = header client width.
@@ -803,8 +803,8 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
         dim as string sTrace = "Header rects:"
         dim as integer prevRight = 0
         dim as boolean okContig = true
-        for i as integer = 0 to CColumnHeader_GetCount( HWND_COLHDR ) - 1
-            CColumnHeader_GetColumnRect( HWND_COLHDR, i, rcH )
+        for i as integer = 0 to PsColumnHeader_GetCount( HWND_COLHDR ) - 1
+            PsColumnHeader_GetColumnRect( HWND_COLHDR, i, rcH )
             sTrace &= " c" & str(i) & "=[" & str(rcH.left) & ".." & str(rcH.right) & "]"
             if i = 0 then
                 if rcH.left <> 0 then okContig = false
@@ -838,10 +838,10 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
                                "/" & str(contW) & " hdrH=" & str(hdrHgt) & " listTop=" & str(listTop)
         print sTrace
         dim as boolean okShown = (hdrTop = 0) andalso (hdrWide = contW) andalso (listTop = hdrHgt)
-        CListBox_ShowHeader( HWND_FRMEXPLORER2, false )
+        PsListBox_ShowHeader( HWND_FRMEXPLORER2, false )
         GetWindowRect( hList2, @rcList )
         dim as integer listTopHidden = rcList.top - rcCont.top
-        CListBox_ShowHeader( HWND_FRMEXPLORER2, true )
+        PsListBox_ShowHeader( HWND_FRMEXPLORER2, true )
         dim as boolean okHidden = (listTopHidden = 0)
         dim as string sVerdict = "Embed layout: "
         if okShown andalso okHidden then sVerdict &= "PASS" else sVerdict &= "FAIL"
@@ -849,12 +849,12 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
         print sVerdict
     end scope
 
-    print "CListBox / CVScrollBar test harness"
+    print "PsListBox / PsVScrollBar test harness"
     print "-----------------------------------"
-    print "Instance A (left) : "; CListBox_GetCount( HWND_FRMEXPLORER ); " model rows, "; _
-          CListBox_GetVisibleCount( HWND_FRMEXPLORER ); " visible   [extended select: Shift/Ctrl]"
-    print "Instance B (right): "; CListBox_GetCount( HWND_FRMEXPLORER2 ); " model rows, "; _
-          CListBox_GetVisibleCount( HWND_FRMEXPLORER2 ); " visible   [multi select: click toggles]"
+    print "Instance A (left) : "; PsListBox_GetCount( HWND_FRMEXPLORER ); " model rows, "; _
+          PsListBox_GetVisibleCount( HWND_FRMEXPLORER ); " visible   [extended select: Shift/Ctrl]"
+    print "Instance B (right): "; PsListBox_GetCount( HWND_FRMEXPLORER2 ); " model rows, "; _
+          PsListBox_GetVisibleCount( HWND_FRMEXPLORER2 ); " visible   [multi select: click toggles]"
     print
     print "Manual checks (things a script cannot drive):"
     print "  Selection  A: click / Ctrl+click toggles / Shift+click ranges"
@@ -875,16 +875,16 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
     print "             dbl-click a divider autosizes to the caption; click a column"
     print "             body SORTS instance B (arrow glyph, toggles asc/desc; press,"
     print "             slide off, release -> nothing); tooltip shows column text"
-    print "  Self-test  CLISTBOX_SELFTEST=1 main.exe -> geometry asserts, then exits"
+    print "  Self-test  PSLISTBOX_SELFTEST=1 main.exe -> geometry asserts, then exits"
     print
 
     
     UpdateWindow( pWindow->hWindow )
     ShowWindow( pWindow->hWindow, SW_SHOW )
 
-    ' Headless geometry/contract assertions, then exit (CHScrollBar's env-gate shape):
+    ' Headless geometry/contract assertions, then exit (PsHScrollBar's env-gate shape):
     ' a normal launch never runs this.
-    if environ("CLISTBOX_SELFTEST") = "1" then
+    if environ("PSLISTBOX_SELFTEST") = "1" then
         frmMain_RunSelfTest()
         DestroyWindow( HWND_FRMMAIN )
     end if
