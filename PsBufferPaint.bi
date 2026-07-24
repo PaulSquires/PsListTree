@@ -39,7 +39,7 @@
 ' backend while both existed; do not "correct" them by reasoning about what the docs imply.
 ' ========================================================================================
 
-' Included HERE rather than left to the call site on purpose. CListBox.bi names typedefs it
+' Included HERE rather than left to the call site on purpose. PsListBox.bi names typedefs it
 ' does not include and so only compiles where the host happens to have pre-loaded them (see
 ' CLAUDE.md); this file does not repeat that trap.
 '
@@ -58,7 +58,7 @@ declare function isMouseOverRECT( byval hWin as HWND, byval rc as RECT ) as bool
 declare function isMouseOverWindow( byval hChild as HWND ) as boolean
 declare function PaintRect( byval hDC as HDC, byval rc as RECT ptr, byval clr as COLORREF ) as long
 
-type CBufferPaint
+type PsBufferPaint
     private:
         _hwnd            as HWND
         _hDC             as HDC
@@ -82,7 +82,7 @@ type CBufferPaint
         ' One Graphics per buffer, built on first use and torn down before the blit.
         _pGraphics       as CGpGraphics ptr
         ' Brush and pen are cached and reused across calls, keyed on what they were
-        ' built from. A CListBox repaint runs this path once per visible row, so
+        ' built from. A PsListBox repaint runs this path once per visible row, so
         ' allocating a fresh GDI+ object per fill would be pure churn.
         _pBrush          as CGpSolidBrush ptr
         _brushARGB       as ARGB
@@ -176,7 +176,7 @@ type CBufferPaint
     ' PaintText with the LAYOUT FLAGS LEFT TO THE CALLER -- only DT_NOPREFIX is forced.
     ' PaintText above forces DT_VCENTER or DT_SINGLELINE, so it structurally cannot draw
     ' wrapped text; this is the way in for DT_WORDBREAK / DT_TOP / DT_CALCRECT. Additive,
-    ' added for CMessageBox: nothing that used PaintText changed.
+    ' added for PsMessageBox: nothing that used PaintText changed.
     declare function PaintTextEx( _
                 byval wszText as DWSTRING, _
                 byval rc as RECT ptr, _

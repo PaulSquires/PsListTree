@@ -1,14 +1,14 @@
 ''
-''  CVScrollBar.inc  -- owner-drawn vertical scrollbar
+''  PsVScrollBar.inc  -- owner-drawn vertical scrollbar
 ''
 
-#include once "CVScrollBar.bi"
+#include once "PsVScrollBar.bi"
 
 
-function GetVScrollBarPointer( byval hSB as HWND ) as CVSCROLLBAR ptr
+function GetVScrollBarPointer( byval hSB as HWND ) as PSVSCROLLBAR ptr
     dim pWindow as CWindow ptr = AfxCWindowPtr(hSB)
     if pWindow = 0 then return 0
-    return cast( CVSCROLLBAR ptr, pWindow->UserData(0) )
+    return cast( PSVSCROLLBAR ptr, pWindow->UserData(0) )
 end function
 
 
@@ -19,7 +19,7 @@ end function
 ' THE one place that clamps, recalculates, invalidates and notifies. Paging and the wheel
 ' both route through it, so the two can never drift apart.
 ' ========================================================================================
-function CVScrollBar_StepBy( byval pSB as CVSCROLLBAR ptr, byval nUnits as integer ) as boolean
+function PsVScrollBar_StepBy( byval pSB as PSVSCROLLBAR ptr, byval nUnits as integer ) as boolean
     if pSB = 0 then return false
     dim as integer newPos = pSB->nPos + nUnits
     if newPos < 0 then newPos = 0
@@ -37,9 +37,9 @@ end function
 ' Move by one page in the given direction (-1 up / +1 down), notifying the owner.
 ' Returns TRUE if the position actually changed.
 ' ========================================================================================
-function CVScrollBar_PageStep( byval pSB as CVSCROLLBAR ptr, byval nDir as integer ) as boolean
+function PsVScrollBar_PageStep( byval pSB as PSVSCROLLBAR ptr, byval nDir as integer ) as boolean
     if pSB = 0 then return false
-    return CVScrollBar_StepBy( pSB, nDir * pSB->nPage )
+    return PsVScrollBar_StepBy( pSB, nDir * pSB->nPage )
 end function
 
 
@@ -50,13 +50,13 @@ end function
 '
 ' nDelta is the ALREADY-EXTRACTED signed delta, not the raw wParam:
 '
-'     CVScrollBar_HandleWheelDelta( hSB, cast(short, hiword(wParam)) )
+'     PsVScrollBar_HandleWheelDelta( hSB, cast(short, hiword(wParam)) )
 '
 ' The cast matters -- loword/hiword yield UNSIGNED words, so a scroll-up delta read without
 ' it becomes ~65416 and the direction silently inverts (see C:\dev\Learnings.md).
 '
 ' SIGN: for WM_MOUSEWHEEL a POSITIVE delta means the wheel moved away from the user, which
-' scrolls UP, which DECREASES nPos. That is the opposite of CHScrollBar, whose horizontal
+' scrolls UP, which DECREASES nPos. That is the opposite of PsHScrollBar, whose horizontal
 ' WM_MOUSEHWHEEL uses a positive delta for "scroll right" = nPos increases. The two look
 ' equally plausible in code, so the sign is applied here, once, with this comment on it.
 '
@@ -66,8 +66,8 @@ end function
 '
 ' Returns TRUE if the position actually moved.
 ' ========================================================================================
-function CVScrollBar_HandleWheelDelta( byval hSB as HWND, byval nDelta as integer ) as boolean
-    dim as CVSCROLLBAR ptr pSB = GetVScrollBarPointer(hSB)
+function PsVScrollBar_HandleWheelDelta( byval hSB as HWND, byval nDelta as integer ) as boolean
+    dim as PSVSCROLLBAR ptr pSB = GetVScrollBarPointer(hSB)
     if pSB = 0 then return false
     if nDelta = 0 then return false
 
@@ -82,7 +82,7 @@ function CVScrollBar_HandleWheelDelta( byval hSB as HWND, byval nDelta as intege
         SystemParametersInfo( SPI_GETWHEELSCROLLLINES, 0, @sysval, 0 )
         ' WHEEL_PAGESCROLL (= UINT_MAX) means "one page per notch". FreeBASIC's winuser.bi
         ' declares the SPI_* constants but NOT this one, so it is spelled out -- the same
-        ' workaround CTextBox.inc uses for the identical check.
+        ' workaround PsTextBox.inc uses for the identical check.
         if sysval = cast(ulong, &hFFFFFFFF) then
             nStep = pSB->nPage
         else
@@ -99,14 +99,14 @@ function CVScrollBar_HandleWheelDelta( byval hSB as HWND, byval nDelta as intege
     ' accumulator overshooting past the units actually applied.
     pSB->nWheelAccum -= (nUnits * 120) \ nStep
 
-    return CVScrollBar_StepBy( pSB, -nUnits )    ' SIGN: positive delta scrolls up
+    return PsVScrollBar_StepBy( pSB, -nUnits )    ' SIGN: positive delta scrolls up
 end function
 
 
 ' ========================================================================================
 ' Stop the track auto-repeat.
 ' ========================================================================================
-sub CVScrollBar_StopRepeat( byval pSB as CVSCROLLBAR ptr )
+sub PsVScrollBar_StopRepeat( byval pSB as PSVSCROLLBAR ptr )
     if pSB = 0 then return
     if pSB->repeatTimerOn then
         KillTimer( pSB->hWin, IDT_CVSCROLL_REPEAT )
@@ -120,7 +120,7 @@ end sub
 ' Clear the thumb hover state and stop the hover poll timer. Repaints only if the
 ' state actually changes, so this is cheap to call repeatedly.
 ' ========================================================================================
-sub CVScrollBar_ClearHot( byval pSB as CVSCROLLBAR ptr )
+sub PsVScrollBar_ClearHot( byval pSB as PSVSCROLLBAR ptr )
     if pSB = 0 then return
     if pSB->hotTimerOn then
         KillTimer( pSB->hWin, IDT_CVSCROLL_HOTTRACK )
@@ -137,15 +137,15 @@ end sub
 ' Process WM_PAINT. The thumb is always recalculated from the current range here, so it
 ' can never go stale no matter who changed the position.
 ' ========================================================================================
-function CVScrollBar_OnPaint( byval hwnd as HWND ) as LRESULT
-    dim as CVSCROLLBAR ptr pSB = GetVScrollBarPointer(hwnd)
+function PsVScrollBar_OnPaint( byval hwnd as HWND ) as LRESULT
+    dim as PSVSCROLLBAR ptr pSB = GetVScrollBarPointer(hwnd)
     if pSB = 0 then return 0
     pSB->Recalc()
 
-    dim as CBufferPaint b
+    dim as PsBufferPaint b
     b.BeginDoubleBuffer(hwnd)
 
-    dim as CVSCROLLBAR_PAINTINFO p
+    dim as PSVSCROLLBAR_PAINTINFO p
     GetClientRect( hwnd, @p.rcClient )
     p.b          = @b
     p.rcThumb    = pSB->rcThumb
@@ -172,19 +172,19 @@ end function
 
 
 ' ========================================================================================
-' CVScrollBar Window procedure
+' PsVScrollBar Window procedure
 ' ========================================================================================
-function CVScrollBar_WndProc( _
+function PsVScrollBar_WndProc( _
             byval hwnd   as HWND, _
             byval uMsg   as UINT, _
             byval wParam as WPARAM, _
             byval lParam as LPARAM _
             ) as LRESULT
 
-    dim as CVSCROLLBAR ptr pSB = GetVScrollBarPointer(hwnd)
+    dim as PSVSCROLLBAR ptr pSB = GetVScrollBarPointer(hwnd)
 
     select case uMsg
-        HANDLE_MSG (hwnd, WM_PAINT, CVScrollBar_OnPaint)
+        HANDLE_MSG (hwnd, WM_PAINT, PsVScrollBar_OnPaint)
 
     case WM_ERASEBKGND
         return true      ' the double buffer paints every pixel
@@ -200,8 +200,8 @@ function CVScrollBar_WndProc( _
         ' Hidden (e.g. auto-hide) while the mouse was over the thumb: drop the hover
         ' state, or it would reappear stale the next time we are shown.
         if (pSB <> 0) andalso (wParam = 0) then
-            CVScrollBar_ClearHot( pSB )
-            CVScrollBar_StopRepeat( pSB )
+            PsVScrollBar_ClearHot( pSB )
+            PsVScrollBar_StopRepeat( pSB )
             pSB->isDragging = false
         end if
 
@@ -221,7 +221,7 @@ function CVScrollBar_WndProc( _
         else
             ' Track click: page once now, then auto-repeat while held.
             pSB->repeatDir = iif( pt.y < pSB->rcThumb.top, -1, 1 )
-            CVScrollBar_PageStep( pSB, pSB->repeatDir )
+            PsVScrollBar_PageStep( pSB, pSB->repeatDir )
             SetCapture( hwnd )
             SetTimer( hwnd, IDT_CVSCROLL_REPEAT, CVSCROLL_REPEAT_DELAY, NULL )
             pSB->repeatTimerOn = true
@@ -245,7 +245,7 @@ function CVScrollBar_WndProc( _
             end if
         else
             ' Hover tracking. WM_MOUSELEAVE is not reliably delivered on fast exits,
-            ' so arm a poll timer as a safety net (same approach as CListBox).
+            ' so arm a poll timer as a safety net (same approach as PsListBox).
             dim tme as TRACKMOUSEEVENT
             tme.cbSize    = sizeof(TRACKMOUSEEVENT)
             tme.dwFlags   = TME_LEAVE
@@ -272,7 +272,7 @@ function CVScrollBar_WndProc( _
         if pSB then
             if pSB->isDragging orelse pSB->repeatTimerOn then ReleaseCapture()
             pSB->isDragging = false
-            CVScrollBar_StopRepeat( pSB )
+            PsVScrollBar_StopRepeat( pSB )
             InvalidateRect( hwnd, NULL, FALSE )
         end if
         return 0
@@ -281,13 +281,13 @@ function CVScrollBar_WndProc( _
         ' Capture lost (someone else took it): never leave a drag/repeat stranded.
         if pSB then
             pSB->isDragging = false
-            CVScrollBar_StopRepeat( pSB )
+            PsVScrollBar_StopRepeat( pSB )
             InvalidateRect( hwnd, NULL, FALSE )
         end if
         return 0
 
     case WM_MOUSELEAVE
-        CVScrollBar_ClearHot( pSB )
+        PsVScrollBar_ClearHot( pSB )
         return 0
 
     case WM_MOUSEWHEEL
@@ -297,9 +297,9 @@ function CVScrollBar_WndProc( _
         ' hiword is unsigned (Learnings.md).
         '
         ' Reaching us at all depends on "scroll inactive windows when I hover over them"
-        ' (on by default), since this control never takes focus -- see CVScrollBar.bi.
+        ' (on by default), since this control never takes focus -- see PsVScrollBar.bi.
         if pSB then
-            CVScrollBar_HandleWheelDelta( hwnd, cast(short, hiword(wParam)) )
+            PsVScrollBar_HandleWheelDelta( hwnd, cast(short, hiword(wParam)) )
             return 0                    ' we own this gesture, moved or not
         end if
         ' No instance: fall through to DefWindowProc so the message still bubbles up.
@@ -309,7 +309,7 @@ function CVScrollBar_WndProc( _
 
         if wParam = IDT_CVSCROLL_HOTTRACK then
             dim as RECT rcClient : GetClientRect( hwnd, @rcClient )
-            if isMouseOverRECT( hwnd, rcClient ) = false then CVScrollBar_ClearHot( pSB )
+            if isMouseOverRECT( hwnd, rcClient ) = false then PsVScrollBar_ClearHot( pSB )
             return 0
         end if
 
@@ -321,16 +321,16 @@ function CVScrollBar_WndProc( _
             ' Stop once the thumb has travelled far enough to reach the cursor
             ' (standard scrollbar behavior), or when there is nowhere left to go.
             if PtInRect( @pSB->rcThumb, pt ) then
-                CVScrollBar_StopRepeat( pSB )
-            elseif CVScrollBar_PageStep( pSB, pSB->repeatDir ) = false then
-                CVScrollBar_StopRepeat( pSB )
+                PsVScrollBar_StopRepeat( pSB )
+            elseif PsVScrollBar_PageStep( pSB, pSB->repeatDir ) = false then
+                PsVScrollBar_StopRepeat( pSB )
             end if
             return 0
         end if
 
     case WM_NCDESTROY
         if pSB then
-            CVScrollBar_StopRepeat( pSB )
+            PsVScrollBar_StopRepeat( pSB )
             if pSB->hotTimerOn then KillTimer( hwnd, IDT_CVSCROLL_HOTTRACK )
             delete(pSB)
         end if
@@ -347,17 +347,17 @@ end function
 
 
 ' ========================================================================================
-' CVScrollBar_Create. The control starts hidden; the owner shows it once it knows
+' PsVScrollBar_Create. The control starts hidden; the owner shows it once it knows
 ' whether there is anything to scroll.
 ' ========================================================================================
-function CVScrollBar_Create( byval hWndParent as HWND, byval CtrlID as integer ) as HWND
+function PsVScrollBar_Create( byval hWndParent as HWND, byval CtrlID as integer ) as HWND
     dim pWindow as CWindow ptr = New CWindow
 
     dim as HWND hSB = _
-        pWindow->Create( hWndParent, "", @CVScrollBar_WndProc, _
+        pWindow->Create( hWndParent, "", @PsVScrollBar_WndProc, _
                          0, 0, 0, 0, WS_CHILD or WS_CLIPSIBLINGS or WS_CLIPCHILDREN )
 
-    dim as CVSCROLLBAR ptr pSB = new CVSCROLLBAR
+    dim as PSVSCROLLBAR ptr pSB = new PSVSCROLLBAR
     pSB->hWin = hSB
     pWindow->UserData(0) = cast(LONG_PTR, pSB)
     SetWindowLongPtr( hSB, GWLP_ID, CtrlID )
@@ -370,8 +370,8 @@ end function
 ' Set the scroll range. total = number of units, page = units visible at once,
 ' pos = index of the first visible unit. Clamped and repainted.
 ' ========================================================================================
-sub CVScrollBar_SetRange( byval hSB as HWND, byval nTotal as integer, byval nPage as integer, byval nPosition as integer )
-    dim as CVSCROLLBAR ptr pSB = GetVScrollBarPointer(hSB)
+sub PsVScrollBar_SetRange( byval hSB as HWND, byval nTotal as integer, byval nPage as integer, byval nPosition as integer )
+    dim as PSVSCROLLBAR ptr pSB = GetVScrollBarPointer(hSB)
     if pSB = 0 then return
     if nTotal < 0 then nTotal = 0
     if nPage  < 0 then nPage  = 0
@@ -385,8 +385,8 @@ sub CVScrollBar_SetRange( byval hSB as HWND, byval nTotal as integer, byval nPag
 end sub
 
 
-function CVScrollBar_GetPos( byval hSB as HWND ) as integer
-    dim as CVSCROLLBAR ptr pSB = GetVScrollBarPointer(hSB)
+function PsVScrollBar_GetPos( byval hSB as HWND ) as integer
+    dim as PSVSCROLLBAR ptr pSB = GetVScrollBarPointer(hSB)
     if pSB = 0 then return 0
     return pSB->nPos
 end function
@@ -394,8 +394,8 @@ end function
 
 ' Set the position without invoking the scroll callback (this is the owner telling us
 ' where it scrolled to, not the user scrolling).
-sub CVScrollBar_SetPos( byval hSB as HWND, byval nPosition as integer )
-    dim as CVSCROLLBAR ptr pSB = GetVScrollBarPointer(hSB)
+sub PsVScrollBar_SetPos( byval hSB as HWND, byval nPosition as integer )
+    dim as PSVSCROLLBAR ptr pSB = GetVScrollBarPointer(hSB)
     if pSB = 0 then return
     if nPosition < 0 then nPosition = 0
     if nPosition > pSB->MaxPos() then nPosition = pSB->MaxPos()
@@ -406,15 +406,15 @@ sub CVScrollBar_SetPos( byval hSB as HWND, byval nPosition as integer )
 end sub
 
 
-function CVScrollBar_NeedsThumb( byval hSB as HWND ) as boolean
-    dim as CVSCROLLBAR ptr pSB = GetVScrollBarPointer(hSB)
+function PsVScrollBar_NeedsThumb( byval hSB as HWND ) as boolean
+    dim as PSVSCROLLBAR ptr pSB = GetVScrollBarPointer(hSB)
     if pSB = 0 then return false
     return pSB->NeedsThumb()
 end function
 
 
-sub CVScrollBar_SetColors( byval hSB as HWND, byval backclr as COLORREF, byval foreclr as COLORREF, byval foreclrhot as COLORREF )
-    dim as CVSCROLLBAR ptr pSB = GetVScrollBarPointer(hSB)
+sub PsVScrollBar_SetColors( byval hSB as HWND, byval backclr as COLORREF, byval foreclr as COLORREF, byval foreclrhot as COLORREF )
+    dim as PSVSCROLLBAR ptr pSB = GetVScrollBarPointer(hSB)
     if pSB = 0 then return
     pSB->BackColor    = backclr
     pSB->ForeColor    = foreclr
@@ -423,16 +423,16 @@ sub CVScrollBar_SetColors( byval hSB as HWND, byval backclr as COLORREF, byval f
 end sub
 
 
-sub CVScrollBar_SetPaintCallback( byval hSB as HWND, byval usersub as VScrollPaintCallbackSub )
-    dim as CVSCROLLBAR ptr pSB = GetVScrollBarPointer(hSB)
+sub PsVScrollBar_SetPaintCallback( byval hSB as HWND, byval usersub as VScrollPaintCallbackSub )
+    dim as PSVSCROLLBAR ptr pSB = GetVScrollBarPointer(hSB)
     if pSB = 0 then return
     pSB->PaintCallback = usersub
     InvalidateRect( hSB, NULL, FALSE )
 end sub
 
 
-sub CVScrollBar_SetScrollCallback( byval hSB as HWND, byval usersub as VScrollCallbackSub )
-    dim as CVSCROLLBAR ptr pSB = GetVScrollBarPointer(hSB)
+sub PsVScrollBar_SetScrollCallback( byval hSB as HWND, byval usersub as VScrollCallbackSub )
+    dim as PSVSCROLLBAR ptr pSB = GetVScrollBarPointer(hSB)
     if pSB = 0 then return
     pSB->ScrollCallback = usersub
 end sub
@@ -451,8 +451,8 @@ end sub
 ' every such call would discard every sub-notch remainder and put the dead-then-jump
 ' behaviour straight back.
 ' ========================================================================================
-sub CVScrollBar_SetWheelStep( byval hSB as HWND, byval nUnitsPerNotch as integer )
-    dim as CVSCROLLBAR ptr pSB = GetVScrollBarPointer(hSB)
+sub PsVScrollBar_SetWheelStep( byval hSB as HWND, byval nUnitsPerNotch as integer )
+    dim as PSVSCROLLBAR ptr pSB = GetVScrollBarPointer(hSB)
     if pSB = 0 then return
     if nUnitsPerNotch < 0 then nUnitsPerNotch = 0
     if pSB->nWheelStep = nUnitsPerNotch then return   ' no-op: keep the remainder
@@ -461,8 +461,8 @@ sub CVScrollBar_SetWheelStep( byval hSB as HWND, byval nUnitsPerNotch as integer
 end sub
 
 
-function CVScrollBar_GetWheelStep( byval hSB as HWND ) as integer
-    dim as CVSCROLLBAR ptr pSB = GetVScrollBarPointer(hSB)
+function PsVScrollBar_GetWheelStep( byval hSB as HWND ) as integer
+    dim as PSVSCROLLBAR ptr pSB = GetVScrollBarPointer(hSB)
     if pSB = 0 then return 0
     return pSB->nWheelStep
 end function

@@ -1,14 +1,14 @@
 '    Owner-drawn vertical scrollbar control
 '
-'    A self-contained, per-instance control in the same vein as CListBox: it owns its
+'    A self-contained, per-instance control in the same vein as PsListBox: it owns its
 '    own window class and keeps all state per instance in the CWindow UserData area, so
 '    any number of instances can coexist. It knows nothing about listboxes -- the owner
-'    drives it purely through CVScrollBar_SetRange( total, page, pos ) and is told about
+'    drives it purely through PsVScrollBar_SetRange( total, page, pos ) and is told about
 '    user scrolling through a scroll callback.
 
 #pragma once
 
-#include once "CBufferPaint.bi"
+#include once "PsBufferPaint.bi"
 
 ' Timer ids are per-window, so every instance can share these values.
 #define IDT_CVSCROLL_HOTTRACK   &hCB10
@@ -19,8 +19,8 @@
 #define CVSCROLL_MIN_THUMB      20     ' minimum thumb height (DPI scaled at use)
 #define CVSCROLL_DEFAULT_WIDTH  12     ' default track width (DPI scaled at use)
 
-type CVSCROLLBAR_PAINTINFO
-    b            as CBufferPaint ptr  ' points to the caller's buffer (no copy)
+type PSVSCROLLBAR_PAINTINFO
+    b            as PsBufferPaint ptr  ' points to the caller's buffer (no copy)
     rcClient     as RECT                 ' the whole track
     rcThumb      as RECT                 ' empty when no thumb is needed
     isHot        as boolean              ' mouse is over the thumb
@@ -28,11 +28,11 @@ type CVSCROLLBAR_PAINTINFO
 end type
 
 ' Paint the scrollbar. If unset, a default paint using the colors below is used.
-type VScrollPaintCallbackSub as sub( byval p as CVSCROLLBAR_PAINTINFO ptr )
+type VScrollPaintCallbackSub as sub( byval p as PSVSCROLLBAR_PAINTINFO ptr )
 ' Called when the user scrolls (drag or track paging). newPos is the new top position.
 type VScrollCallbackSub as sub( byval hScrollBar as HWND, byval newPos as integer )
 
-type CVSCROLLBAR
+type PSVSCROLLBAR
     hWin          as HWND
     ' --- Range model. Deliberately generic: "total" units, "page" units visible,
     '     "pos" = index of the first visible unit. ---
@@ -69,12 +69,12 @@ type CVSCROLLBAR
     declare function PosFromThumbTop( byval thumbTop as integer ) as integer
 end type
 
-function CVSCROLLBAR.TrackHeight() as integer
+function PSVSCROLLBAR.TrackHeight() as integer
     dim as RECT rc : GetClientRect( this.hWin, @rc )
     return rc.bottom - rc.top
 end function
 
-function CVSCROLLBAR.MaxPos() as integer
+function PSVSCROLLBAR.MaxPos() as integer
     dim as integer m = this.nTotal - this.nPage
     if m < 0 then m = 0
     return m
@@ -85,7 +85,7 @@ end function
 ' at that point we may still be 0x0 (we only get a size once we are shown). Folding a
 ' track-height test in here would deadlock: never sized -> never needed -> never shown.
 ' The geometry guard lives in Recalc instead.
-function CVSCROLLBAR.NeedsThumb() as boolean
+function PSVSCROLLBAR.NeedsThumb() as boolean
     if (this.nTotal <= 0) orelse (this.nPage <= 0) then return false
     return (this.nTotal > this.nPage)                       ' false = everything fits
 end function
@@ -93,7 +93,7 @@ end function
 ' Derive the thumb rect from the range. Size and position both scale off the TRACK
 ' height (not any external control's height), and the thumb is clamped to a minimum
 ' so it stays grabbable on very large lists.
-sub CVSCROLLBAR.Recalc()
+sub PSVSCROLLBAR.Recalc()
     SetRectEmpty( @this.rcThumb )
     this.thumbHeight = 0
     if this.NeedsThumb() = false then exit sub
@@ -121,7 +121,7 @@ sub CVSCROLLBAR.Recalc()
 end sub
 
 ' Inverse of Recalc's position mapping: which pos does a given thumb top represent?
-function CVSCROLLBAR.PosFromThumbTop( byval thumbTop as integer ) as integer
+function PSVSCROLLBAR.PosFromThumbTop( byval thumbTop as integer ) as integer
     dim as integer span = this.TrackHeight() - this.thumbHeight
     if span <= 0 then return 0
     if thumbTop < 0 then thumbTop = 0
@@ -135,16 +135,16 @@ end function
 
 ' ----------------------------------------------------------------------------------------
 ' PUBLIC API
-' All CVScrollBar_* functions take the handle returned by CVScrollBar_Create().
+' All PsVScrollBar_* functions take the handle returned by PsVScrollBar_Create().
 ' ----------------------------------------------------------------------------------------
-declare function CVScrollBar_Create( byval hWndParent as HWND, byval CtrlID as integer ) as HWND
-declare sub      CVScrollBar_SetRange( byval hSB as HWND, byval nTotal as integer, byval nPage as integer, byval nPosition as integer )
-declare function CVScrollBar_GetPos( byval hSB as HWND ) as integer
-declare sub      CVScrollBar_SetPos( byval hSB as HWND, byval nPosition as integer )
-declare function CVScrollBar_NeedsThumb( byval hSB as HWND ) as boolean
-declare sub      CVScrollBar_SetColors( byval hSB as HWND, byval backclr as COLORREF, byval foreclr as COLORREF, byval foreclrhot as COLORREF )
-declare sub      CVScrollBar_SetPaintCallback( byval hSB as HWND, byval usersub as VScrollPaintCallbackSub )
-declare sub      CVScrollBar_SetScrollCallback( byval hSB as HWND, byval usersub as VScrollCallbackSub )
+declare function PsVScrollBar_Create( byval hWndParent as HWND, byval CtrlID as integer ) as HWND
+declare sub      PsVScrollBar_SetRange( byval hSB as HWND, byval nTotal as integer, byval nPage as integer, byval nPosition as integer )
+declare function PsVScrollBar_GetPos( byval hSB as HWND ) as integer
+declare sub      PsVScrollBar_SetPos( byval hSB as HWND, byval nPosition as integer )
+declare function PsVScrollBar_NeedsThumb( byval hSB as HWND ) as boolean
+declare sub      PsVScrollBar_SetColors( byval hSB as HWND, byval backclr as COLORREF, byval foreclr as COLORREF, byval foreclrhot as COLORREF )
+declare sub      PsVScrollBar_SetPaintCallback( byval hSB as HWND, byval usersub as VScrollPaintCallbackSub )
+declare sub      PsVScrollBar_SetScrollCallback( byval hSB as HWND, byval usersub as VScrollCallbackSub )
 
 ' ----------------------------------------------------------------------------------------
 ' MOUSE WHEEL / TRACKPAD
@@ -158,7 +158,7 @@ declare sub      CVScrollBar_SetScrollCallback( byval hSB as HWND, byval usersub
 ' bigger target than the bar itself -- passing the ALREADY-EXTRACTED signed delta:
 '
 '     case WM_MOUSEWHEEL
-'         CVScrollBar_HandleWheelDelta( hSB, cast(short, hiword(wParam)) )
+'         PsVScrollBar_HandleWheelDelta( hSB, cast(short, hiword(wParam)) )
 '
 ' The cast matters: loword/hiword yield UNSIGNED words, so a delta read without it turns
 ' ~-120 into ~65416 and the direction silently inverts (see C:\dev\Learnings.md).
@@ -178,6 +178,6 @@ declare sub      CVScrollBar_SetScrollCallback( byval hSB as HWND, byval usersub
 ' per notch"). Set it when your range units are neither lines nor characters and the system
 ' number would be meaningless.
 ' ----------------------------------------------------------------------------------------
-declare function CVScrollBar_HandleWheelDelta( byval hSB as HWND, byval nDelta as integer ) as boolean
-declare sub      CVScrollBar_SetWheelStep( byval hSB as HWND, byval nUnitsPerNotch as integer )
-declare function CVScrollBar_GetWheelStep( byval hSB as HWND ) as integer
+declare function PsVScrollBar_HandleWheelDelta( byval hSB as HWND, byval nDelta as integer ) as boolean
+declare sub      PsVScrollBar_SetWheelStep( byval hSB as HWND, byval nUnitsPerNotch as integer )
+declare function PsVScrollBar_GetWheelStep( byval hSB as HWND ) as integer

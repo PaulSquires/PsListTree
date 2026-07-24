@@ -12,7 +12,7 @@
 '    GNU General Public License for more details.
 
 
-#include once "CBufferPaint.bi"
+#include once "PsBufferPaint.bi"
 
 ' ========================================================================================
 ' Determine if the mouse cursor is currently over client RECT area
@@ -52,7 +52,7 @@ private function CBufToARGB( byval clr as COLORREF, byval nAlpha as ubyte ) as A
 end function
 
 
-function CBufferPaint.SetupBitmap() as long
+function PsBufferPaint.SetupBitmap() as long
     _memDC = CreateCompatibleDC( _hDC )
     SaveDC( _memDC )
 
@@ -83,7 +83,7 @@ function CBufferPaint.SetupBitmap() as long
     function = 0
 end function
 
-function CBufferPaint.BeginDoubleBuffer( byval hwnd as HWND ) as long
+function PsBufferPaint.BeginDoubleBuffer( byval hwnd as HWND ) as long
     _UsePaint = true
     _hwnd = hwnd
     _hDC = BeginPaint( _hwnd, @_ps )
@@ -93,7 +93,7 @@ function CBufferPaint.BeginDoubleBuffer( byval hwnd as HWND ) as long
 end function
 
 ' Overload that provides an hDC rather than use BeginPaint/EndPaint
-function CBufferPaint.BeginDoubleBuffer( byval hwnd as HWND, byval hdc as HDC, byval rcItem as RECT ) as long
+function PsBufferPaint.BeginDoubleBuffer( byval hwnd as HWND, byval hdc as HDC, byval rcItem as RECT ) as long
     _UsePaint = false
     _owns = true
     _hwnd = hwnd
@@ -106,7 +106,7 @@ end function
 ' Cached overload: draw into a caller-owned memDC (bitmap already selected and
 ' large enough). Saves DC state so per-row object selections don't accumulate;
 ' EndDoubleBuffer blits but does not delete the DC/bitmap (the caller owns them).
-function CBufferPaint.BeginDoubleBuffer( byval hwnd as HWND, byval hdc as HDC, byval rcItem as RECT, byval cachedMemDC as HDC ) as long
+function PsBufferPaint.BeginDoubleBuffer( byval hwnd as HWND, byval hdc as HDC, byval rcItem as RECT, byval cachedMemDC as HDC ) as long
     _UsePaint = false
     _owns = false
     _hwnd = hwnd
@@ -118,7 +118,7 @@ function CBufferPaint.BeginDoubleBuffer( byval hwnd as HWND, byval hdc as HDC, b
     function = 0
 end function
 
-function CBufferPaint.EndDoubleBuffer() as long
+function PsBufferPaint.EndDoubleBuffer() as long
     ' Tear the GDI+ objects down BEFORE the blit. Deleting the Graphics flushes any
     ' batched drawing; blitting first would copy a surface that is still missing it.
     this.ReleaseGpObjects()
@@ -137,7 +137,7 @@ end function
 ' RAII safety net: release any GDI objects still held if EndDoubleBuffer was
 ' not reached (e.g. an early return between Begin and End). Only frees objects
 ' this instance owns; handles are nulled by End, so this never double-frees.
-destructor CBufferPaint()
+destructor PsBufferPaint()
     ' Same reasoning as the GDI handles below: End nulls these, so reaching them here
     ' means Begin/End was not balanced. Must still happen before the process calls
     ' GdiplusShutdown.
@@ -154,7 +154,7 @@ end destructor
 ' GDI+ object lifetime. All three are lazy: a buffer that only ever paints text (several
 ' do) never constructs a Graphics at all.
 ' ========================================================================================
-private function CBufferPaint.EnsureGraphics() as CGpGraphics ptr
+private function PsBufferPaint.EnsureGraphics() as CGpGraphics ptr
     if _pGraphics = 0 then
         if _memDC = 0 then return 0
         _pGraphics = new CGpGraphics( _memDC )
@@ -166,7 +166,7 @@ private function CBufferPaint.EnsureGraphics() as CGpGraphics ptr
     return _pGraphics
 end function
 
-private function CBufferPaint.BrushFor( byval clr as ARGB ) as CGpBrush ptr
+private function PsBufferPaint.BrushFor( byval clr as ARGB ) as CGpBrush ptr
     if _pBrush = 0 then
         _pBrush = new CGpSolidBrush( clr )
         _brushARGB = clr
@@ -177,7 +177,7 @@ private function CBufferPaint.BrushFor( byval clr as ARGB ) as CGpBrush ptr
     return cast( CGpBrush ptr, _pBrush )
 end function
 
-private function CBufferPaint.PenFor( byval clr as ARGB, byval nWidth as single ) as CGpPen ptr
+private function PsBufferPaint.PenFor( byval clr as ARGB, byval nWidth as single ) as CGpPen ptr
     if _pPen = 0 then
         _pPen = new CGpPen( clr, nWidth )
         _penARGB = clr
@@ -195,14 +195,14 @@ private function CBufferPaint.PenFor( byval clr as ARGB, byval nWidth as single 
     return _pPen
 end function
 
-private sub CBufferPaint.EnsureGdiReady()
+private sub PsBufferPaint.EnsureGdiReady()
     if _gpDirty andalso (_pGraphics <> 0) then
         _pGraphics->Flush( FlushIntentionSync )
         _gpDirty = false
     end if
 end sub
 
-private sub CBufferPaint.ReleaseGpObjects()
+private sub PsBufferPaint.ReleaseGpObjects()
     if _pPen      then delete _pPen      : _pPen = 0
     if _pBrush    then delete _pBrush    : _pBrush = 0
     if _pGraphics then delete _pGraphics : _pGraphics = 0
@@ -217,7 +217,7 @@ end sub
 ' number straight through here makes every corner twice as round, which still looks
 ' deliberate and is why PaintRectFactory does the halving in one clearly-marked place.
 ' ========================================================================================
-private sub CBufferPaint.BuildRoundPath( _
+private sub PsBufferPaint.BuildRoundPath( _
             byval pPath as CGpGraphicsPath ptr, _
             byval x as single, _
             byval y as single, _
@@ -247,15 +247,15 @@ private sub CBufferPaint.BuildRoundPath( _
 end sub
 
 
-function CBufferPaint.rcClient() as RECT
+function PsBufferPaint.rcClient() as RECT
     return _rc
 end function
 
-function CBufferPaint.rcClientWidth() as long
+function PsBufferPaint.rcClientWidth() as long
     return _rc.right - _rc.left
 end function
 
-function CBufferPaint.rcClientHeight() as long
+function PsBufferPaint.rcClientHeight() as long
     return _rc.bottom - _rc.top
 end function
 
@@ -263,33 +263,33 @@ end function
 ' something with GDI -- read pixels back, blit, draw directly -- so the GDI+ batch is
 ' flushed first. Without this, anything drawn through the buffer's own methods may simply
 ' not be on the surface yet, and a caller that reads it sees a half-painted picture. That
-' is not hypothetical: CToggle's self-test scans the knob's rim through this exact path,
+' is not hypothetical: PsToggle's self-test scans the knob's rim through this exact path,
 ' BEFORE EndDoubleBuffer, and would otherwise be measuring blank background.
-function CBufferPaint.getMemDC() as HDC
+function PsBufferPaint.getMemDC() as HDC
     this.EnsureGdiReady()
     return _memDC
 end function
 
 ' Store a caller-supplied font handle. The control/host owns the HFONT and is
 ' responsible for destroying it; the double buffer only selects it while painting.
-function CBufferPaint.SetFont( byval hFont as HFONT ) as long
+function PsBufferPaint.SetFont( byval hFont as HFONT ) as long
     if hFont then _hFont = hFont
     function = 0
 end function
 
-function CBufferPaint.SetForeColor( byval forecolor as COLORREF ) as long
+function PsBufferPaint.SetForeColor( byval forecolor as COLORREF ) as long
     _forecolor = forecolor
     _forealpha = 255
     function = 0
 end function
 
-function CBufferPaint.SetBackColor( byval backcolor as COLORREF ) as long
+function PsBufferPaint.SetBackColor( byval backcolor as COLORREF ) as long
     _backcolor = backcolor
     _backalpha = 255
     function = 0
 end function
 
-function CBufferPaint.SetColors( byval forecolor as COLORREF, byval backcolor as COLORREF ) as long
+function PsBufferPaint.SetColors( byval forecolor as COLORREF, byval backcolor as COLORREF ) as long
     _forecolor = forecolor
     _backcolor = backcolor
     _forealpha = 255
@@ -297,7 +297,7 @@ function CBufferPaint.SetColors( byval forecolor as COLORREF, byval backcolor as
     function = 0
 end function
 
-function CBufferPaint.SetPenColor( byval pencolor as COLORREF ) as long
+function PsBufferPaint.SetPenColor( byval pencolor as COLORREF ) as long
     _pencolor = pencolor
     _penalpha = 255
     function = 0
@@ -305,19 +305,19 @@ end function
 
 ' --- Alpha-bearing variants. The plain setters above are these with nAlpha = 255, which
 '     is why every existing call still means "opaque" without saying so. ---
-function CBufferPaint.SetForeColorA( byval forecolor as COLORREF, byval nAlpha as ubyte ) as long
+function PsBufferPaint.SetForeColorA( byval forecolor as COLORREF, byval nAlpha as ubyte ) as long
     _forecolor = forecolor
     _forealpha = nAlpha
     function = 0
 end function
 
-function CBufferPaint.SetBackColorA( byval backcolor as COLORREF, byval nAlpha as ubyte ) as long
+function PsBufferPaint.SetBackColorA( byval backcolor as COLORREF, byval nAlpha as ubyte ) as long
     _backcolor = backcolor
     _backalpha = nAlpha
     function = 0
 end function
 
-function CBufferPaint.SetPenColorA( byval pencolor as COLORREF, byval nAlpha as ubyte ) as long
+function PsBufferPaint.SetPenColorA( byval pencolor as COLORREF, byval nAlpha as ubyte ) as long
     _pencolor = pencolor
     _penalpha = nAlpha
     function = 0
@@ -337,7 +337,7 @@ end function
 '   nCurvature  the ellipse DIAMETER, as RoundRect took it. BuildRoundPath wants a radius,
 '               so the halving happens below, in one clearly-marked place.
 ' ========================================================================================
-function CBufferPaint.PaintRectFactory( _
+function PsBufferPaint.PaintRectFactory( _
             byval rc as RECT ptr, _
             byval iStyle as long, _
             byval nPenWidth as long = 1, _
@@ -405,7 +405,7 @@ function CBufferPaint.PaintRectFactory( _
 
 end function
 
-function CBufferPaint.PaintRect( byval rc as RECT ptr ) as long
+function PsBufferPaint.PaintRect( byval rc as RECT ptr ) as long
     dim as CGpGraphics ptr g = this.EnsureGraphics()
     if g = 0 then return 0
 
@@ -425,25 +425,25 @@ function CBufferPaint.PaintRect( byval rc as RECT ptr ) as long
     return 0
 end function
 
-function CBufferPaint.PaintClientRect() as long
+function PsBufferPaint.PaintClientRect() as long
     return this.PaintRect( @_rc )
 end function
 
-function CBufferPaint.PaintBorderRect( _
+function PsBufferPaint.PaintBorderRect( _
             byval rc as RECT ptr, _
             byval nPenWidth as long = 1 _
             ) as long
     return this.PaintRectFactory( rc, PS_SOLID, nPenWidth, 0 )
 end function
 
-function CBufferPaint.PaintRoundRect( _
+function PsBufferPaint.PaintRoundRect( _
             byval rc as RECT ptr, _
             byval nCurvature as long = 20 _
             ) as long
     return this.PaintRectFactory( rc, PS_NULL, 1, nCurvature )
 end function
 
-function CBufferPaint.PaintRoundBorderRect( _
+function PsBufferPaint.PaintRoundBorderRect( _
             byval rc as RECT ptr, _
             byval nCurvature as long = 20, _
             byval nPenWidth as long = 1 _
@@ -451,7 +451,7 @@ function CBufferPaint.PaintRoundBorderRect( _
     return this.PaintRectFactory( rc, PS_SOLID, nPenWidth, nCurvature )
 end function
 
-function CBufferPaint.PaintText( _
+function PsBufferPaint.PaintText( _
             byval wszText as DWSTRING, _
             byval rc as RECT ptr, _
             byval wsStyle as DWORD _
@@ -483,13 +483,13 @@ end function
 ' to eat an ampersand) while DT_WORDBREAK, DT_TOP and DT_CALCRECT become reachable.
 '
 ' ADDITIVE: PaintText is untouched and no existing call site changes behaviour. Added for
-' CMessageBox, whose message body is multi-line by definition; anything drawing a single
+' PsMessageBox, whose message body is multi-line by definition; anything drawing a single
 ' centred line should keep using PaintText, which cannot get those two flags wrong.
 '
 ' MEASURE WITH THE SAME FLAGS YOU DRAW WITH. A caller that sizes a box with
 ' DT_CALCRECT or DT_WORDBREAK and then draws without DT_WORDBREAK gets one long clipped
 ' line inside a tall box, and nothing about that failure points back here.
-function CBufferPaint.PaintTextEx( _
+function PsBufferPaint.PaintTextEx( _
             byval wszText as DWSTRING, _
             byval rc as RECT ptr, _
             byval wsStyle as DWORD _
@@ -514,7 +514,7 @@ function CBufferPaint.PaintTextEx( _
     function = 0
 end function
 
-function CBufferPaint.PaintChar( _
+function PsBufferPaint.PaintChar( _
             byval wszChar as DWSTRING, _
             byval rc as RECT ptr, _
             byval forecolor as COLORREF _
@@ -541,7 +541,7 @@ end function
 ' PaintRectFactory -- see the fill/stroke path split there for why the stroke sits half a
 ' pixel inside the fill boundary.
 ' ========================================================================================
-function CBufferPaint.PaintRoundOutline( _
+function PsBufferPaint.PaintRoundOutline( _
             byval rc as RECT ptr, _
             byval nCurvature as long = 20, _
             byval nPenWidth as long = 1 _
@@ -580,9 +580,9 @@ end function
 ' ========================================================================================
 ' Filled ellipse; strokes the rim too when nPenWidth > 0. The rim is antialiased, which is
 ' the whole reason this exists as a primitive rather than being left to each control to
-' hand-roll -- CToggle spent a version doing exactly that, with a 4x supersampled tile.
+' hand-roll -- PsToggle spent a version doing exactly that, with a 4x supersampled tile.
 ' ========================================================================================
-function CBufferPaint.PaintEllipse( _
+function PsBufferPaint.PaintEllipse( _
             byval rc as RECT ptr, _
             byval nPenWidth as long = 0 _
             ) as long
@@ -617,7 +617,7 @@ function CBufferPaint.PaintEllipse( _
     function = 0
 end function
 
-function CBufferPaint.PaintIconButton( _
+function PsBufferPaint.PaintIconButton( _
             byval wszText as DWSTRING, _
             byval rc as RECT ptr, _
             byval nCurvature as long = 20 _
@@ -648,7 +648,7 @@ end function
 ' where the 1px rule painted 10..39). That was a thick-pen end-cap artifact, not intent.
 ' Here a 2px rule ends where a 1px rule does.
 ' ========================================================================================
-function CBufferPaint.PaintLine( _
+function PsBufferPaint.PaintLine( _
             byval nWidth as long, _
             byval nLeft as long, _
             byval nTop as long, _
@@ -692,7 +692,7 @@ end function
 
 
 ' ========================================================================================
-' Geometry self-test, run with CBUFFERPAINT_SELFTEST=1.
+' Geometry self-test, run with PSBUFFERPAINT_SELFTEST=1.
 '
 ' Renders through the real public methods into an offscreen surface and reads the pixels
 ' back, so it asserts the rendering rather than the arithmetic behind it.
@@ -710,7 +710,7 @@ end function
 ' Reports assertions RUN as well as failed: a harness that only counts failures cannot
 ' tell "all passed" from "barely executed" (Learnings.md).
 ' ========================================================================================
-namespace CBufferPaintSelfTest
+namespace PsBufferPaintSelfTest
     dim shared as long gRun, gFail
     dim shared as HDC     gDC
     dim shared as HBITMAP gBmp
@@ -777,11 +777,11 @@ namespace CBufferPaintSelfTest
     end function
 end namespace
 
-sub CBufferPaint_RunSelfTest( byval hwnd as HWND )
-    using CBufferPaintSelfTest
+sub PsBufferPaint_RunSelfTest( byval hwnd as HWND )
+    using PsBufferPaintSelfTest
 
     print ""
-    print "=== CBufferPaint geometry self-test ==="
+    print "=== PsBufferPaint geometry self-test ==="
 
     gRun = 0 : gFail = 0
 
@@ -809,7 +809,7 @@ sub CBufferPaint_RunSelfTest( byval hwnd as HWND )
     ' --- PaintRect: fills [left,right) x [top,bottom), same as ExtTextOut/ETO_OPAQUE ----
     ClearSurf()
     scope
-        dim bb as CBufferPaint
+        dim bb as PsBufferPaint
         bb.BeginDoubleBuffer( hwnd, gDC, rcAll )
         bb.SetBackColor( CBACK ) : bb.PaintClientRect()
         dim as RECT r = type( 10, 5, 40, 20 )
@@ -827,7 +827,7 @@ sub CBufferPaint_RunSelfTest( byval hwnd as HWND )
     '     This is the one that was wrong first time round.
     ClearSurf()
     scope
-        dim bb as CBufferPaint
+        dim bb as PsBufferPaint
         bb.BeginDoubleBuffer( hwnd, gDC, rcAll )
         bb.SetBackColor( CBACK ) : bb.PaintClientRect()
         dim as RECT r = type( 10, 5, 40, 20 )
@@ -847,7 +847,7 @@ sub CBufferPaint_RunSelfTest( byval hwnd as HWND )
     '     still looks deliberate -- so the corner is measured, not eyeballed. -----------
     ClearSurf()
     scope
-        dim bb as CBufferPaint
+        dim bb as PsBufferPaint
         bb.BeginDoubleBuffer( hwnd, gDC, rcAll )
         bb.SetBackColor( CBACK ) : bb.PaintClientRect()
         dim as RECT r = type( 10, 5, 50, 35 )      ' 40 x 30
@@ -873,7 +873,7 @@ sub CBufferPaint_RunSelfTest( byval hwnd as HWND )
     '     endpoint. An antialiased 1px divider goes grey, which reads as a theme bug. --
     ClearSurf()
     scope
-        dim bb as CBufferPaint
+        dim bb as PsBufferPaint
         bb.BeginDoubleBuffer( hwnd, gDC, rcAll )
         bb.SetBackColor( CBACK ) : bb.PaintClientRect()
         bb.SetPenColor( CPEN ) : bb.PaintLine( 1, 10, 8, 40, 8 )
@@ -893,7 +893,7 @@ sub CBufferPaint_RunSelfTest( byval hwnd as HWND )
 
     ClearSurf()
     scope
-        dim bb as CBufferPaint
+        dim bb as PsBufferPaint
         bb.BeginDoubleBuffer( hwnd, gDC, rcAll )
         bb.SetBackColor( CBACK ) : bb.PaintClientRect()
         bb.SetPenColor( CPEN ) : bb.PaintLine( 2, 10, 8, 40, 8 )
@@ -909,7 +909,7 @@ sub CBufferPaint_RunSelfTest( byval hwnd as HWND )
 
     ClearSurf()
     scope
-        dim bb as CBufferPaint
+        dim bb as PsBufferPaint
         bb.BeginDoubleBuffer( hwnd, gDC, rcAll )
         bb.SetBackColor( CBACK ) : bb.PaintClientRect()
         bb.SetPenColor( CPEN ) : bb.PaintLine( 1, 20, 5, 20, 30 )
@@ -930,7 +930,7 @@ sub CBufferPaint_RunSelfTest( byval hwnd as HWND )
     '     PaintText this is exactly what goes missing, intermittently. ----------------
     ClearSurf()
     scope
-        dim bb as CBufferPaint
+        dim bb as PsBufferPaint
         bb.BeginDoubleBuffer( hwnd, gDC, rcAll )
         bb.SetBackColor( CBACK ) : bb.PaintClientRect()
         dim as RECT r = type( 10, 5, 40, 20 )
@@ -946,7 +946,7 @@ sub CBufferPaint_RunSelfTest( byval hwnd as HWND )
     ' --- PaintEllipse: the knob primitive. Must be round, centred, and antialiased. -----
     ClearSurf()
     scope
-        dim bb as CBufferPaint
+        dim bb as PsBufferPaint
         bb.BeginDoubleBuffer( hwnd, gDC, rcAll )
         bb.SetBackColor( CBACK ) : bb.PaintClientRect()
         dim as RECT r = type( 10, 5, 30, 25 )        ' 20 x 20 circle
@@ -971,7 +971,7 @@ sub CBufferPaint_RunSelfTest( byval hwnd as HWND )
     ' --- PaintRoundOutline: strokes WITHOUT filling. The interior must survive. ---------
     ClearSurf()
     scope
-        dim bb as CBufferPaint
+        dim bb as PsBufferPaint
         bb.BeginDoubleBuffer( hwnd, gDC, rcAll )
         bb.SetBackColor( CBACK ) : bb.PaintClientRect()
         dim as RECT r = type( 10, 5, 50, 30 )
@@ -984,7 +984,7 @@ sub CBufferPaint_RunSelfTest( byval hwnd as HWND )
     Chk( "RoundOutline: edge carries the pen colour", (GetPixel( gDC, 30, 5 ) = CPEN), _
          "top edge want " & hex(CPEN,6) & " got " & hex(GetPixel(gDC,30,5),6) )
 
-    ' --- The CACHED overload: a caller-owned memDC, reused per row by CListBox. It is
+    ' --- The CACHED overload: a caller-owned memDC, reused per row by PsListBox. It is
     '     the one Begin path that skips SetupBitmap, so it never gets the 32bpp DIB the
     '     others do -- it draws onto whatever surface the host already made. Every list
     '     in the app goes through here once per visible row, so it is asserted rather
@@ -998,7 +998,7 @@ sub CBufferPaint_RunSelfTest( byval hwnd as HWND )
         ReleaseDC( null, hScr2 )
 
         dim as RECT rRow = type( 0, 0, SW, 12 )
-        dim bb as CBufferPaint
+        dim bb as PsBufferPaint
         bb.BeginDoubleBuffer( hwnd, gDC, rRow, cacheDC )
         bb.SetBackColor( CFILL )
         bb.PaintRect( @rRow )
