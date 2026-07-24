@@ -21,6 +21,14 @@ rows but never renumbers anything.
 
 ---
 
+## What it looks like
+
+![The CListbox demo](CListBox.png)
+
+Two instances. On the left a grouped single-column list — a collapsible group header, one selected row, and rows that keep their selection across a collapse. On the right the same control in report mode: a `CColumnHeader` band (Name / Size / Type), a group row, and an embedded `CVScrollBar` down the right edge. Public indices in both are **model** indices; the visible index space never leaks out.
+
+---
+
 ## Requirements
 
 **Files to copy into your project:**
