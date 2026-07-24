@@ -349,6 +349,78 @@ existed keeps working unchanged.
 Inserting or deleting a column shifts every row's cell storage across that alias — insert a
 column at 0 and each row's text becomes its column 1 cell.
 
+### Spanned rows
+
+An ordinary, selectable row can be made to paint as **one cell across the whole column band**
+instead of one cell per column — `PsListBox_SetRowSpanColumns( h, row, true )`. Use it for a
+section note, a "no results" line, or any wide message row that lives among columned rows.
+
+Its text stays in **column 0** (`PsListBox_GetText` / `GetCellText( h, row, 0 )`). At paint time
+the callback receives `p->columnCount = 1` with `p->isSpanned = true`; `cells[0].rc` runs from
+column 0's own left to the last column's right (the same left a normal column-0 cell gets, so
+the spanned text lines up under column 0), and `cells[0].wszText` is the column-0 text. A painter
+that already loops `for c = 0 to columnCount - 1` draws it correctly with **no new branch** — it
+simply draws one wide cell. Selection and hover still fill the full `p->rc`, and the row selects,
+hot-tracks and keyboard-navigates like any other.
+
+Two details worth knowing:
+
+- With **no columns defined**, a spanned row is already full-width (`columnCount = 0`); the flag
+  only advertises the intent via `p->isSpanned`.
+- A spanned row is **exempt from the column-shift** above: inserting or deleting a column never
+  moves its text out of column 0, so its caption cannot be silently blanked.
+
+Group headers are **not** spanned rows — they have their own `isHeader` path and carry
+`isSpanned = false`.
+
+### Drag-and-drop reordering
+
+Opt in with `PsListBox_SetDragReorder( h, true )` (default **OFF**) and the user can drag rows to
+new positions inside the same list:
+
+- **What drags** — press an item and move past the system drag threshold. If the pressed row is
+  part of a multi-selection, the **whole selection** moves (gathered contiguously at the drop,
+  keeping its relative order, even if it was non-contiguous); otherwise just that one row.
+  Headers and non-selectable rows are never draggable.
+- **Where it drops** — a horizontal insertion line shows the target gap. Dropping **on a header**
+  highlights it and inserts the block as that header's **first children** (a collapsed header
+  expands on drop). Because grouping is positional, a row dropped into another group simply
+  belongs to it afterward.
+- **Feedback** — the insertion line / header highlight paints in `SetDragIndicatorColor` (accent
+  blue by default). Dragging near the top/bottom edge **auto-scrolls** so off-screen targets are
+  reachable. **Esc** — or any loss of mouse capture — cancels the drag with no move.
+
+The control moves its **own** model and fires two optional callbacks: **`CanDrop`** just before
+(return FALSE to reject — it receives the source rows and the drop-target row's `ROWINFO`), and
+**`DragDrop`** just after (the block's new first row and count, so you can resync parallel data
+via `itemData`). This is the only gesture in the control that takes mouse **capture**, and only
+while a drag is actually in progress.
+
+`PsListBox_MoveRows( h, srcRows(), insertBefore )` performs the same reorder programmatically —
+**silent** (no `DragDrop`), like every other setter.
+
+### Non-selectable rows
+
+A row can be made **non-selectable** — `PsListBox_SetRowSelectable( h, row, false )`. It then
+cannot be selected or focused **by any path**, and keyboard navigation skips over it:
+
+- **Mouse** — clicking it changes nothing (no selection, no focus). The host still sees the
+  raw click through the message callback.
+- **Keyboard** — arrows, PageUp/Down, Home and End step past it to the nearest selectable row.
+  A single-step arrow that would only reach non-selectable rows leaves the caret where it is;
+  the paging and Home/End keys always land on *some* selectable row if one exists.
+- **Programmatic** — `SetCurSel` returns -1 and no-ops, `SetSel( …, true )` returns FALSE,
+  `SelectAll` skips it, and a Shift-range selects every selectable row it spans but not this one.
+
+The rule is a hard invariant: a non-selectable row is *never* selected and *never* focused. If
+you mark a row non-selectable while it is the current/selected row, its selection is cleared and
+the caret is dropped (silent, repaints). To select it again, clear the flag first.
+
+The paint callback gets `p->isSelectable`, so a painter can grey the row — that is cosmetic; the
+control does the blocking regardless of how you draw it. The flag is independent of the others: a
+row can be spanned and non-selectable at once (a section note that fills the width and can't be
+picked).
+
 ### Batch bulk changes
 
 Every model mutator rebuilds the visible map and repaints. Wrap a bulk load in
@@ -535,6 +607,19 @@ index.
 | `PsListBox_GetTopIndex( h ) as integer` | The model index of the first displayed row, or -1 when nothing is visible. |
 | `PsListBox_SetTopIndex( h, row ) as integer` | Scrolls so `row` is at the top. A row hidden under a collapsed header resolves to its group header, so any valid model row may be passed without checking collapse state. The scroll is clamped — never past the point where the last row sits at the bottom of the viewport — and the **clamped** result is returned. -1 for an invalid row. |
 
+### Drag-and-drop reordering
+
+Opt-in; see the *Drag-and-drop reordering* concept above. Register the callbacks with the
+functions under *Callback registration*.
+
+| Function | Description |
+|---|---|
+| `PsListBox_SetDragReorder( h, enable = true ) as boolean` | Turns drag-reorder on or off (default OFF). Turning it off also cancels any drag in progress. |
+| `PsListBox_GetDragReorder( h ) as boolean` | Whether drag-reorder is enabled. |
+| `PsListBox_MoveRows( h, srcRows() as integer, insertBefore ) as integer` | Moves the given MODEL rows so they land contiguously before `insertBefore` (a MODEL index; `GetCount()` appends). Sources may be non-contiguous and any order; they are de-duplicated, kept in original relative order, and **headers among them are ignored**. Selection travels with each row. The moved block becomes the focus/anchor. Returns the block's new first index, or -1 if nothing moved. **Silent** (no `DragDrop`); repaints. |
+| `PsListBox_SetDragIndicatorColor( h, clr ) as COLORREF` | Sets the insertion-line / header-highlight colour and returns the previous one. |
+| `PsListBox_GetDragIndicatorColor( h ) as COLORREF` | The current indicator colour. |
+
 ### Appearance
 
 | Function | Description |
@@ -583,6 +668,10 @@ for the layout rules these delegate to.
 | `PsListBox_GetHeaderHeight( h ) as integer` | Band height in **unscaled** units. |
 | `PsListBox_SetHeaderHeight( h, height ) as integer` | Sets it, clamped to a minimum of 1, and returns the clamped value. Unscaled units — do not pre-scale. |
 | `PsListBox_GetHeader( h ) as HWND` | The header child, for direct `PsColumnHeader_*` calls (padding, hit-tests, theming). **Do not set its WidthChanged callback** — that slot belongs to this control. |
+| `PsListBox_SetRowSpanColumns( h, row, bSpan = true ) as boolean` | Makes an ordinary (selectable) row paint as one cell spanning every column instead of one per column; its text stays in column 0. The painter gets `columnCount = 1` and `p->isSpanned = true`. **Silent, and repaints.** FALSE for an invalid row. See *Spanned rows* above. |
+| `PsListBox_GetRowSpanColumns( h, row ) as boolean` | Whether that row is spanned. FALSE for an invalid row. |
+| `PsListBox_SetRowSelectable( h, row, bSelectable = true ) as boolean` | Sets whether the row can be selected/focused. `false` makes it non-selectable on every path (mouse, keyboard, programmatic) and keyboard nav skips it; marking a live selected/focused row non-selectable clears its selection and drops the caret. **Silent, and repaints.** FALSE for an invalid row. See *Non-selectable rows* above. |
+| `PsListBox_GetRowSelectable( h, row ) as boolean` | Whether the row can be selected (default TRUE). FALSE for an invalid row. |
 
 ### Callback registration
 
@@ -592,6 +681,8 @@ for the layout rules these delegate to.
 | `PsListBox_SetMessageCallback( h, userfunc )` | Installs an observer for the mouse messages. |
 | `PsListBox_SetTooltipCallback( h, userfunc )` | Installs the on-demand tooltip text supplier. Unset, the row's own text is used. |
 | `PsListBox_SetSelChangeCallback( h, usersub )` | Installs the handler told when the **user** moves the selection, by mouse or keyboard. |
+| `PsListBox_SetCanDropCallback( h, userfunc )` | Installs the drag-reorder **veto** (fires before a drop; return FALSE to reject). See below. |
+| `PsListBox_SetDragDropCallback( h, usersub )` | Installs the drag-reorder **notify** (fires after a user drop). See below. |
 | `PsListBox_SetColumnResizeCallback( h, usersub )` | Installs the handler told when the **user** resizes a column. This is the correct door — the header's own slot is taken. |
 | `PsListBox_SetColumnClickCallback( h, usersub )` | Installs the completed-click-on-a-column-body handler. Passes straight through to the header. |
 | `PsListBox_SetColumnAutoSizeCallback( h, userfunc )` | Installs the divider-double-click best-fit measurer. Passes straight through. |
@@ -684,13 +775,21 @@ may override the font per row.
 | `isFocused` | The row holds the keyboard caret |
 | `isHeader` | This is a group-header row |
 | `isCollapsed` | Header rows only: its items are hidden |
+| `isSpanned` | This row spans every column — see below and *Spanned rows* |
+| `isSelectable` | FALSE if the host made the row non-selectable — grey it if you like; the control does the blocking (see *Non-selectable rows*) |
 | `wszCaption` | The row's text (column 0) |
-| `columnCount` | Number of cells in `cells`, or **0** for a full-width row |
-| `cells` | Array of `PSLISTBOX_CELLINFO`, or **null** for a full-width row |
+| `columnCount` | Number of cells in `cells`: 0 for a full-width row, **1** for a spanned row over defined columns, else one per column |
+| `cells` | Array of `PSLISTBOX_CELLINFO`, or **null** when `columnCount` is 0 |
 
-`columnCount` is 0 and `cells` is null whenever the row should paint as one full-width cell:
-no columns are defined, **or** the row is a group header. Test `columnCount > 0` and you have
-covered both.
+`columnCount` is 0 and `cells` is null whenever the row should paint as one full-width cell with
+no columns to fill: no columns are defined, **or** the row is a group header.
+
+A **spanned** row (`isSpanned = true`) over defined columns instead arrives with
+`columnCount = 1` and a single `cells[0]` whose rect covers the whole column band — so a painter
+that loops `for c = 0 to columnCount - 1` draws it as one wide cell unchanged. (With no columns
+defined it is already full-width, `columnCount = 0`, and only `isSpanned` marks the intent.)
+Whenever you fill the row background from `p->rc` before drawing cells, selection and hover cover
+the whole row in every case.
 
 `PSLISTBOX_CELLINFO`:
 
@@ -776,6 +875,33 @@ It does **not** fire for `PsListBox_SetCurSel`, `SetSel`, `SelectAll` or `Clear`
 makes those safe to call from inside this handler. Nor does it fire when the user re-selects
 the row that is already current, or when a clamped arrow key does not actually move the caret —
 only a real change notifies.
+
+### Drag and drop
+
+```freebasic
+type PSLISTBOX_DROPINFO
+    hList        as HWND
+    srcRows      as integer ptr           ' the MODEL indices being dragged (srcCount of them)
+    srcCount     as integer
+    insertBefore as integer               ' MODEL index the block will land before (0..rowCount)
+    onHeader     as boolean               ' TRUE = dropped on a header (block becomes its first children)
+    targetRow    as integer               ' MODEL index of the drop-target row, or -1 at the list end
+    targetInfo   as PSLISTBOX_ROWINFO ptr ' the target row's ROWINFO (read-only), or NULL at the end
+end type
+
+type CanDropCallbackFunc as function( byval p as PSLISTBOX_DROPINFO ptr ) as boolean
+type DragDropCallbackSub as sub( byval hList as HWND, byval newFirstRow as integer, byval count as integer )
+```
+
+**`CanDrop`** fires just before a user drop commits. Return FALSE to reject it — the model is left
+untouched. The `DROPINFO` is a snapshot valid **only** for the duration of the call: `srcRows`
+points at control-owned scratch and `targetInfo` at a live `ROWINFO`, so copy anything you need to
+keep and do not mutate the model from inside. Unset = every drop is allowed.
+
+**`DragDrop`** fires just after a user drop moves rows. `newFirstRow` is the model index the moved
+block now starts at and `count` is how many rows moved — walk `newFirstRow .. newFirstRow+count-1`
+with the getters (or `itemData`) to resync a parallel model. It does **not** fire for
+`PsListBox_MoveRows` (programmatic moves are silent, like every other setter).
 
 ### Header callbacks
 

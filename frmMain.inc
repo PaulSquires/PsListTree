@@ -125,6 +125,9 @@ sub PsListBox_PaintCallback( byval p as PSLISTBOX_PAINTINFO ptr )
         backclr = theme.BackColor
         foreclr = theme.ForeColor
     end if
+    ' Non-selectable item rows are greyed so the user can see they cannot be picked. This is
+    ' cosmetic only -- the control blocks selection/focus regardless of how the host paints.
+    if (p->isSelectable = false) andalso (p->isHeader = false) then foreclr = &h888888
     p->b->SetForeColor( foreclr )
     p->b->SetBackColor( backclr )
 
@@ -395,6 +398,7 @@ dim shared gSelfTestCellCount as integer = -1     ' -1 = capture never ran
 ' assume -- it has to be read from the same PAINTINFO the cells came from.
 dim shared gSelfTestRowRc as RECT
 dim shared gSelfTestRowIsHeader as boolean = false
+dim shared gSelfTestRowIsSpanned as boolean = false
 dim shared gSelfTestWantRow as integer = -2       ' model row to capture; -2 = any row
 
 ' SelChange recorder: the callback fires only for USER-driven selection moves, so the
@@ -425,6 +429,7 @@ sub SelfTest_RowCapturePaint( byval p as PSLISTBOX_PAINTINFO ptr )
     if (gSelfTestWantRow <> -2) andalso (p->itemID <> gSelfTestWantRow) then exit sub
     gSelfTestCellCount   = p->columnCount
     gSelfTestRowIsHeader = p->isHeader
+    gSelfTestRowIsSpanned = p->isSpanned
     gSelfTestRowRc       = p->rc
     if p->columnCount > 0 then
         redim gSelfTestCells( 0 to p->columnCount - 1 )
@@ -441,6 +446,23 @@ function SelfTest_GrabRow( byval hCtl as HWND, byval modelRow as integer ) as bo
     gSelfTestCellCount = -1
     AfxRedrawWindow( GetDlgItem( hCtl, IDC_FRMMAIN_LISTBOX ) )
     return (gSelfTestCellCount <> -1)
+end function
+
+' Find the MODEL index of the first row whose itemData matches, or -1. Used by the drag
+' self-test to track a row across reorders by identity rather than by a fixed index.
+function SelfTest_RowByData( byval hCtl as HWND, byval dataVal as integer ) as integer
+    for i as integer = 0 to PsListBox_GetCount( hCtl ) - 1
+        if PsListBox_GetItemData( hCtl, i ) = dataVal then return i
+    next
+    return -1
+end function
+
+' Find the MODEL index of the first header row with the given text, or -1.
+function SelfTest_HeaderByText( byval hCtl as HWND, byval sText as DWSTRING ) as integer
+    for i as integer = 0 to PsListBox_GetCount( hCtl ) - 1
+        if PsListBox_IsHeader( hCtl, i ) andalso (PsListBox_GetText( hCtl, i ) = sText) then return i
+    next
+    return -1
 end function
 
 sub frmMain_RunSelfTest()
@@ -621,8 +643,129 @@ sub frmMain_RunSelfTest()
     SelfTest_Check( "cleared callback stops firing", (gSelChangeCount = 0), _
         "fires=" & str(gSelChangeCount) )
 
+    ' ---- 7c. Spanned row: an ordinary item row painted as ONE cell across the whole
+    '          column band, its text kept in column 0, with a clean round-trip back ----
+    PsListBox_SetPaintCallback( hB, @SelfTest_RowCapturePaint )   ' 7b left SelChange only
+    dim as DWSTRING sSpanText = PsListBox_GetText( hB, 2 )
+    SelfTest_Check( "SetRowSpanColumns returns TRUE", _
+        PsListBox_SetRowSpanColumns( hB, 2, true ), "" )
+    SelfTest_Check( "GetRowSpanColumns reflects the setter", _
+        PsListBox_GetRowSpanColumns( hB, 2 ), "" )
+    if SelfTest_GrabRow( hB, 2 ) then
+        SelfTest_Check( "spanned row captures columnCount=1", (gSelfTestCellCount = 1), _
+            "n=" & str(gSelfTestCellCount) )
+        SelfTest_Check( "spanned row sets isSpanned", gSelfTestRowIsSpanned, "" )
+        if gSelfTestCellCount = 1 then
+            dim as RECT rcA, rcZ
+            PsColumnHeader_GetColumnRect( hHdr, 0, rcA )
+            PsColumnHeader_GetColumnRect( hHdr, 2, rcZ )
+            SelfTest_Check( "spanned cell spans col0.left..lastcol.right", _
+                (gSelfTestCells(0).rc.left = rcA.left) andalso (gSelfTestCells(0).rc.right = rcZ.right), _
+                "cell=[" & str(gSelfTestCells(0).rc.left) & ".." & str(gSelfTestCells(0).rc.right) & _
+                "] band=[" & str(rcA.left) & ".." & str(rcZ.right) & "]" )
+            SelfTest_Check( "spanned cell y-span = the row's own y-span", _
+                (gSelfTestCells(0).rc.top = gSelfTestRowRc.top) andalso _
+                (gSelfTestCells(0).rc.bottom = gSelfTestRowRc.bottom), _
+                "cell=[" & str(gSelfTestCells(0).rc.top) & ".." & str(gSelfTestCells(0).rc.bottom) & _
+                "] row=[" & str(gSelfTestRowRc.top) & ".." & str(gSelfTestRowRc.bottom) & "]" )
+            SelfTest_Check( "spanned cell text = column 0 text", _
+                (gSelfTestCells(0).wszText = sSpanText), _
+                "len=" & str(len(gSelfTestCells(0).wszText)) )
+        end if
+    else
+        SelfTest_Check( "paint captured (spanned row)", false, "the row paint callback never ran" )
+    end if
+    ' Round-trip: clearing the flag restores the per-column contract.
+    PsListBox_SetRowSpanColumns( hB, 2, false )
+    if SelfTest_GrabRow( hB, 2 ) then
+        SelfTest_Check( "clearing span restores columnCount=3 and isSpanned=false", _
+            (gSelfTestCellCount = 3) andalso (gSelfTestRowIsSpanned = false), _
+            "n=" & str(gSelfTestCellCount) & " span=" & str(gSelfTestRowIsSpanned) )
+    else
+        SelfTest_Check( "paint captured (span cleared)", false, "the row paint callback never ran" )
+    end if
+
+    ' ---- 7d. Non-selectable rows: blocked on every path (mouse via the shared gate, the
+    '          keyboard skips them, and the programmatic setters refuse them), and marking a
+    '          live row non-selectable clears its selection/focus ----
+    '  Rows 4..7 are file items (Files group expanded); row 5 is the guinea pig.
+    PsListBox_SetCurSel( hB, 4 )
+    SelfTest_Check( "SetRowSelectable returns TRUE", _
+        PsListBox_SetRowSelectable( hB, 5, false ), "" )
+    SelfTest_Check( "GetRowSelectable reflects the setter", _
+        (PsListBox_GetRowSelectable( hB, 5 ) = false), "" )
+
+    ' Keyboard DOWN from row 4 skips the non-selectable row 5 and lands on row 6.
+    gSelChangeCount = 0
+    SendMessage( hInner, WM_KEYDOWN, VK_DOWN, 0 )
+    SelfTest_Check( "VK_DOWN skips the non-selectable row", _
+        (PsListBox_GetCurSel( hB ) = 6), "cur=" & str(PsListBox_GetCurSel( hB )) )
+    ' UP from row 6 skips it again, back to row 4.
+    SendMessage( hInner, WM_KEYDOWN, VK_UP, 0 )
+    SelfTest_Check( "VK_UP skips it back to row 4", _
+        (PsListBox_GetCurSel( hB ) = 4), "cur=" & str(PsListBox_GetCurSel( hB )) )
+
+    ' Programmatic setters refuse it, and leave the current row untouched.
+    dim as integer retSetCur = PsListBox_SetCurSel( hB, 5 )
+    SelfTest_Check( "SetCurSel on a non-selectable row returns -1", _
+        (retSetCur = -1), "ret=" & str(retSetCur) )
+    SelfTest_Check( "...and the current row is unchanged", _
+        (PsListBox_GetCurSel( hB ) = 4), "cur=" & str(PsListBox_GetCurSel( hB )) )
+    SelfTest_Check( "SetSel(true) on a non-selectable row returns FALSE", _
+        (PsListBox_SetSel( hB, 5, true ) = false), "" )
+    SelfTest_Check( "...and it did not become selected", _
+        (PsListBox_GetSel( hB, 5 ) = false), "" )
+    PsListBox_SelectAll( hB, true )
+    SelfTest_Check( "SelectAll skips the non-selectable row", _
+        (PsListBox_GetSel( hB, 5 ) = false), "" )
+    SelfTest_Check( "...but selects a selectable neighbour", _
+        (PsListBox_GetSel( hB, 4 ) = true), "" )
+    PsListBox_SelectAll( hB, false )
+
+    ' Marking a currently selected+focused row non-selectable clears it and drops the caret.
+    PsListBox_SetCurSel( hB, 7 )
+    PsListBox_SetRowSelectable( hB, 7, false )
+    SelfTest_Check( "making the focused row non-selectable deselects it", _
+        (PsListBox_GetSel( hB, 7 ) = false), "" )
+    SelfTest_Check( "...and drops the caret (GetCurSel = -1)", _
+        (PsListBox_GetCurSel( hB ) = -1), "cur=" & str(PsListBox_GetCurSel( hB )) )
+
+    ' Round-trip: re-enabling restores normal behaviour.
+    PsListBox_SetRowSelectable( hB, 5, true )
+    PsListBox_SetRowSelectable( hB, 7, true )
+    dim as integer retReenabled = PsListBox_SetCurSel( hB, 5 )
+    SelfTest_Check( "re-enabled row selects again", _
+        (retReenabled = 5), "ret=" & str(retReenabled) )
+
+    ' ---- 7e. Non-selectable FIRST row + mid-list skip on instance A (extended-select).
+    '          A plain Up from the second row has nowhere selectable to land above it, so the
+    '          caret stays put; Home skips the leading non-selectable row; Up/Down step over a
+    '          non-selectable row mid-list. (Shift-RANGE skip is only reachable by hand -- the
+    '          keydown handler reads GetAsyncKeyState(VK_SHIFT), which SendMessage cannot set --
+    '          but it shares the same model-level guard as SelectAll/SetSel, asserted above.)
+    dim as HWND hA = HWND_FRMEXPLORER
+    dim as HWND hInnerA = GetDlgItem( hA, IDC_FRMMAIN_LISTBOX )
+    PsListBox_SetCurSel( hA, 1 )
+    SendMessage( hInnerA, WM_KEYDOWN, VK_UP, 0 )
+    SelfTest_Check( "Up from row 1 stays put (row 0 non-selectable, nothing above)", _
+        (PsListBox_GetCurSel( hA ) = 1), "cur=" & str(PsListBox_GetCurSel( hA )) )
+    SendMessage( hInnerA, WM_KEYDOWN, VK_HOME, 0 )
+    SelfTest_Check( "Home skips the leading non-selectable row 0 -> row 1", _
+        (PsListBox_GetCurSel( hA ) = 1), "cur=" & str(PsListBox_GetCurSel( hA )) )
+    PsListBox_SetCurSel( hA, 7 )
+    SendMessage( hInnerA, WM_KEYDOWN, VK_DOWN, 0 )
+    SelfTest_Check( "Down from row 7 skips non-selectable row 8 -> row 9", _
+        (PsListBox_GetCurSel( hA ) = 9), "cur=" & str(PsListBox_GetCurSel( hA )) )
+    SendMessage( hInnerA, WM_KEYDOWN, VK_UP, 0 )
+    SelfTest_Check( "Up from row 9 skips row 8 -> row 7", _
+        (PsListBox_GetCurSel( hA ) = 7), "cur=" & str(PsListBox_GetCurSel( hA )) )
+    PsListBox_SetCurSel( hA, 1 )   ' restore
+
     ' ---- 8. DESTRUCTIVE (last): column delete/insert shift the per-row cells across
-    '         the Text<->cells(0) alias, and the fill designation self-heals ----
+    '         the Text<->cells(0) alias, the fill designation self-heals, and a SPANNED
+    '         row is EXEMPT from the shift (its text stays in column 0) ----
+    dim as DWSTRING sSpanKeep = PsListBox_GetText( hB, 2 )
+    PsListBox_SetRowSpanColumns( hB, 2, true )
     PsListBox_DeleteColumn( hB, 2 )
     SelfTest_Check( "delete fill col -> effective fill = last (1)", _
         (PsListBox_GetFillColumn( hB ) = 1), "fill=" & str(PsListBox_GetFillColumn( hB )) )
@@ -637,6 +780,84 @@ sub frmMain_RunSelfTest()
     dim as boolean okIns = (len(sShift0) = 0) andalso (sShift1 = "file0.bas")
     SelfTest_Check( "insert at 0 shifts Text into column 1", okIns, _
         "c0len=" & str(len(sShift0)) & " c1=" & sShift1 )
+
+    ' The spanned row rode through both a DeleteColumn and an InsertColumn(0) with its
+    ' text untouched in column 0 -- the exemption at PsListBox_ShiftCellColumns. Without
+    ' it the insert-at-0 would have pushed the caption into column 1 (as it did for row 1
+    ' above) and the spanned row would silently paint blank.
+    SelfTest_Check( "spanned row is exempt from column shifts", _
+        (PsListBox_GetText( hB, 2 ) = sSpanKeep), _
+        "keep=" & str(len(sSpanKeep)) & " now=" & str(len(PsListBox_GetText( hB, 2 ))) )
+    PsListBox_SetRowSpanColumns( hB, 2, false )
+
+    ' ---- 9. Drag-reorder MODEL move (PsListBox_MoveRows). The gesture itself -- capture,
+    '         threshold, indicator, auto-scroll, CanDrop veto -- is interactive-only (capture
+    '         can't be synthesized; see Learnings.md); these assert the reorder index math on
+    '         instance A, tracking rows by itemData so a move never confuses the next check.
+    '         DESTRUCTIVE to instance A's order, so it runs last. ----
+    dim as HWND hMv = HWND_FRMEXPLORER
+    dim srcMv() as integer
+
+    ' 9a. Single row to the end: itemData 1000 ("Alpha item 0") lands last; focus follows.
+    dim as integer r1000 = SelfTest_RowByData( hMv, 1000 )
+    dim as integer cntA  = PsListBox_GetCount( hMv )
+    redim srcMv( 0 to 0 ) : srcMv(0) = r1000
+    dim as integer nf9a = PsListBox_MoveRows( hMv, srcMv(), cntA )
+    SelfTest_Check( "MoveRows single -> last row, returns its index", _
+        (nf9a = cntA - 1) andalso (SelfTest_RowByData( hMv, 1000 ) = cntA - 1), _
+        "nf=" & str(nf9a) & " at=" & str(SelfTest_RowByData( hMv, 1000 )) )
+    SelfTest_Check( "MoveRows puts the caret on the moved block", _
+        (PsListBox_GetCurSel( hMv ) = nf9a), "cur=" & str(PsListBox_GetCurSel( hMv )) )
+
+    ' 9b. Non-contiguous pair gathers contiguously, in original order, before the target.
+    dim as integer p1001 = SelfTest_RowByData( hMv, 1001 )
+    dim as integer p1003 = SelfTest_RowByData( hMv, 1003 )
+    dim as integer tgt2000 = SelfTest_RowByData( hMv, 2000 )
+    redim srcMv( 0 to 1 ) : srcMv(0) = p1001 : srcMv(1) = p1003
+    PsListBox_MoveRows( hMv, srcMv(), tgt2000 )
+    dim as integer q1001 = SelfTest_RowByData( hMv, 1001 )
+    dim as integer q1003 = SelfTest_RowByData( hMv, 1003 )
+    SelfTest_Check( "MoveRows gathers a non-contiguous pair, order kept", _
+        (q1003 = q1001 + 1), "1001@" & str(q1001) & " 1003@" & str(q1003) )
+    SelfTest_Check( "...and lands the block just before the target row", _
+        (SelfTest_RowByData( hMv, 2000 ) = q1003 + 1), _
+        "2000@" & str(SelfTest_RowByData( hMv, 2000 )) )
+
+    ' 9c. Drop onto a header -> first child (right after the header), regardless of shift.
+    dim as integer hBeta = SelfTest_HeaderByText( hMv, "Group Beta" )
+    dim as integer r1002 = SelfTest_RowByData( hMv, 1002 )
+    redim srcMv( 0 to 0 ) : srcMv(0) = r1002
+    PsListBox_MoveRows( hMv, srcMv(), hBeta + 1 )
+    SelfTest_Check( "MoveRows onto header -> first child", _
+        (SelfTest_RowByData( hMv, 1002 ) = SelfTest_HeaderByText( hMv, "Group Beta" ) + 1), _
+        "1002@" & str(SelfTest_RowByData( hMv, 1002 )) & " beta@" & str(SelfTest_HeaderByText( hMv, "Group Beta" )) )
+
+    ' 9d. Selection travels with a moved row (it lives on the struct).
+    dim as integer r1006 = SelfTest_RowByData( hMv, 1006 )
+    PsListBox_SetSel( hMv, r1006, true )
+    redim srcMv( 0 to 0 ) : srcMv(0) = r1006
+    dim as integer nf9d = PsListBox_MoveRows( hMv, srcMv(), PsListBox_GetCount( hMv ) )
+    SelfTest_Check( "moved row keeps its selection", _
+        (nf9d >= 0) andalso PsListBox_GetSel( hMv, nf9d ), "nf=" & str(nf9d) )
+
+    ' 9e. A header in the source set is ignored (structural rows never move).
+    dim as integer hBeta2 = SelfTest_HeaderByText( hMv, "Group Beta" )
+    dim as integer r2001  = SelfTest_RowByData( hMv, 2001 )
+    dim as integer cntB4  = PsListBox_GetCount( hMv )
+    redim srcMv( 0 to 1 ) : srcMv(0) = hBeta2 : srcMv(1) = r2001
+    PsListBox_MoveRows( hMv, srcMv(), 3 )
+    SelfTest_Check( "header in the source set is ignored", _
+        (SelfTest_HeaderByText( hMv, "Group Beta" ) >= 0) andalso (PsListBox_GetCount( hMv ) = cntB4), _
+        "beta@" & str(SelfTest_HeaderByText( hMv, "Group Beta" )) & " cnt=" & str(PsListBox_GetCount( hMv )) )
+
+    ' 9f. MoveRows moves a NON-SELECTABLE item too: the no-drag rule is a gesture property,
+    '     not a model one, so the programmatic primitive is unrestricted (headers aside).
+    dim as integer r1005 = SelfTest_RowByData( hMv, 1005 )   ' "Alpha item 5", non-selectable
+    redim srcMv( 0 to 0 ) : srcMv(0) = r1005
+    PsListBox_MoveRows( hMv, srcMv(), PsListBox_GetCount( hMv ) )
+    SelfTest_Check( "MoveRows moves a non-selectable item (gesture-only restriction)", _
+        (SelfTest_RowByData( hMv, 1005 ) = PsListBox_GetCount( hMv ) - 1), _
+        "1005@" & str(SelfTest_RowByData( hMv, 1005 )) )
 
     print "=== self-test complete: " & str(gFailCount) & " failure(s) ==="
 end sub
@@ -677,6 +898,26 @@ function PsListBox_MessageCallback( byval m as PSLISTBOX_MESSAGEINFO ptr ) as bo
     ' Return false to allow to fall to the default windows handler
     return false
 end function    
+
+
+' ========================================================================================
+' Drag-and-drop callbacks (demo). DragDrop reports every user move; CanDrop shows a veto
+' using the drop-target ROWINFO -- here it forbids dropping onto the "Folders" header.
+' ========================================================================================
+sub PsListBox_DragDropCallback( byval hList as HWND, byval newFirstRow as integer, byval count as integer )
+    print "DragDrop: moved " & str(count) & " row(s); block now starts at model row " & str(newFirstRow)
+end sub
+
+function PsListBox_CanDropCallback( byval p as PSLISTBOX_DROPINFO ptr ) as boolean
+    if (p->onHeader = true) andalso (p->targetInfo <> 0) then
+        dim as string sTarget = p->targetInfo->Text     ' plain string: print interleaves DWSTRING nulls
+        if sTarget = "Folders" then
+            print "CanDrop: rejected -- cannot drop onto the 'Folders' header"
+            return false
+        end if
+    end if
+    return true
+end function
 
 
 ' ========================================================================================
@@ -726,22 +967,32 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
     PsListBox_SetFont( HWND_FRMEXPLORER, ghFont(GUIFONT_10) )
     PsListBox_SetTooltipCallback( HWND_FRMEXPLORER, @PsListBox_TooltipCallback )
     PsListBox_SetExtendedSelect( HWND_FRMEXPLORER, true )   ' Shift/Ctrl range selection
+    ' Drag-reorder: instance A drags single rows and whole multi-selections (no CanDrop veto).
+    PsListBox_SetDragReorder( HWND_FRMEXPLORER, true )
+    PsListBox_SetDragDropCallback( HWND_FRMEXPLORER, @PsListBox_DragDropCallback )
     ' The scrollbar is created/positioned/auto-hidden by the control; we only theme it.
     ' (PsListBox_SetScrollBarPaintCallback is available for full custom drawing.)
     PsListBox_SetScrollBarColors( HWND_FRMEXPLORER, theme.BackColorScrollBar, _
                                  theme.ForeColorScrollBar, theme.ForeColorScrollBarHot )
     ' Two groups; bulk add is batched so the map rebuilds once, not per row.
     PsListBox_BeginUpdate( HWND_FRMEXPLORER )
-    PsListBox_AddHeader( HWND_FRMEXPLORER, "Group Alpha" )
+    ' Two leading items for the non-selectable-row edge cases (A is extended-select, so it
+    ' also drives the Shift-range test). Row 0 is non-selectable and is the VERY FIRST row:
+    ' pressing Up from row 1 has nowhere selectable to land, so the caret stays on row 1.
+    PsListBox_AddString( HWND_FRMEXPLORER, "(non-selectable first row - Up from below stays put)", 999 )  ' row 0
+    PsListBox_AddString( HWND_FRMEXPLORER, "second row (selectable - press Up here)", 998 )               ' row 1
+    PsListBox_AddHeader( HWND_FRMEXPLORER, "Group Alpha" )                                                ' row 2
     for i as integer = 0 to 20
-        PsListBox_AddString( HWND_FRMEXPLORER, "Alpha item " & i, 1000 + i )
+        PsListBox_AddString( HWND_FRMEXPLORER, "Alpha item " & i, 1000 + i )                              ' rows 3..23
     next
     PsListBox_AddHeader( HWND_FRMEXPLORER, "Group Beta" )
     for i as integer = 0 to 20
         PsListBox_AddString( HWND_FRMEXPLORER, "Beta item " & i, 2000 + i )
     next
     PsListBox_EndUpdate( HWND_FRMEXPLORER )
-    PsListBox_SetCurSel( HWND_FRMEXPLORER, 1 )
+    PsListBox_SetRowSelectable( HWND_FRMEXPLORER, 0, false )    ' the non-selectable first row
+    PsListBox_SetRowSelectable( HWND_FRMEXPLORER, 8, false )    ' "Alpha item 5" -- for the Shift-range test
+    PsListBox_SetCurSel( HWND_FRMEXPLORER, 1 )                  ' start on the second row
 
     ' ---- Instance B (right half): a couple of small groups, one starting
     ' collapsed, PLUS the embedded column header band. Tests: per-instance hover
@@ -760,6 +1011,10 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
                                  theme.ForeColorScrollBar, theme.ForeColorScrollBarHot )
     ' B uses the OTHER selection mode, so the harness covers both.
     PsListBox_SetMultiSelect( HWND_FRMEXPLORER2, true )     ' checklist style: click toggles
+    ' Drag-reorder on B too: it has headers (drop-on-header) and a CanDrop veto guarding "Folders".
+    PsListBox_SetDragReorder( HWND_FRMEXPLORER2, true )
+    PsListBox_SetDragDropCallback( HWND_FRMEXPLORER2, @PsListBox_DragDropCallback )
+    PsListBox_SetCanDropCallback( HWND_FRMEXPLORER2, @PsListBox_CanDropCallback )
     PsListBox_BeginUpdate( HWND_FRMEXPLORER2 )
     PsListBox_AddHeader( HWND_FRMEXPLORER2, "Files" )              ' model row 0
     for i as integer = 0 to 40
@@ -779,6 +1034,19 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
     ' the file loop added 5 rows; row 6 is a file item now, so that call was a silent
     ' no-op and the group never started collapsed.)
     PsListBox_CollapseRow( HWND_FRMEXPLORER2, 42 )
+
+    ' ---- Spanned-row demo: an ordinary selectable item (model row 3) painted as ONE
+    ' cell across the whole column band instead of one cell per column. Its text stays in
+    ' column 0; the paint callback gets columnCount = 1 and p->isSpanned = true. Selecting,
+    ' hover and keyboard navigation still work on it like any other row. ----
+    PsListBox_SetText( HWND_FRMEXPLORER2, 3, "-- spanned row: this item merges all columns --" )
+    PsListBox_SetRowSpanColumns( HWND_FRMEXPLORER2, 3, true )
+
+    ' ---- Non-selectable-row demo: model row 20 cannot be selected or focused; the mouse
+    ' and keyboard both skip it, and the paint callback greys it. ----
+    PsListBox_SetCellText( HWND_FRMEXPLORER2, 20, 1, "--" )
+    PsListBox_SetText( HWND_FRMEXPLORER2, 20, "file19.bas  (non-selectable)" )
+    PsListBox_SetRowSelectable( HWND_FRMEXPLORER2, 20, false )
 
     ' ---- Embedded column header on instance B (phase 3). Columns are defined through
     ' the PsListBox wrappers; the header child is the store. Host callbacks go through
