@@ -348,6 +348,15 @@ function PsBufferPaint.PaintRectFactory( _
     if g = 0 then return 0
 
     dim as boolean bNullPen  = (iStyle = PS_NULL)
+    ' DPI-scale the pen, exactly as PaintLine already does. Without this the buffer was
+    ' internally inconsistent: a rule drawn with PaintLine thickened with the display while
+    ' a border or focus ring drawn here stayed at one physical pixel, so at 175% the two no
+    ' longer matched. A no-op at 100%, where ScaleY(1) is 1.
+    scope
+        dim pWin as CWindow ptr = AfxCWindowPtr(_hwnd)
+        if (pWin <> 0) andalso (nPenWidth > 0) then nPenWidth = pWin->ScaleY(nPenWidth)
+        if nPenWidth < 1 then nPenWidth = 1
+    end scope
     dim as boolean bZeroWide = (nPenWidth <= 0)
     dim as boolean bStroke   = (bNullPen = false) andalso (bZeroWide = false)
 
@@ -547,6 +556,15 @@ function PsBufferPaint.PaintRoundOutline( _
             byval nPenWidth as long = 1 _
             ) as long
     if nPenWidth <= 0 then return 0
+    ' DPI-scale the pen, exactly as PaintLine already does. Without this the buffer was
+    ' internally inconsistent: a rule drawn with PaintLine thickened with the display while
+    ' a border or focus ring drawn here stayed at one physical pixel, so at 175% the two no
+    ' longer matched. A no-op at 100%, where ScaleY(1) is 1.
+    scope
+        dim pWin as CWindow ptr = AfxCWindowPtr(_hwnd)
+        if (pWin <> 0) andalso (nPenWidth > 0) then nPenWidth = pWin->ScaleY(nPenWidth)
+        if nPenWidth < 1 then nPenWidth = 1
+    end scope
 
     dim as CGpGraphics ptr g = this.EnsureGraphics()
     if g = 0 then return 0
