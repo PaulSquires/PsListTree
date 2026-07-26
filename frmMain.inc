@@ -109,9 +109,9 @@ end Function
 dim shared gCellTraceDone as boolean = false
 
 ' ========================================================================================
-' PsListBox_PaintCallback
+' PsListTree_PaintCallback
 ' ========================================================================================
-sub PsListBox_PaintCallback( byval p as PSLISTBOX_PAINTINFO ptr )
+sub PsListTree_PaintCallback( byval p as PSLISTTREE_PAINTINFO ptr )
 
     ' State priority for the row background/foreground: selected > hot > normal
     dim as COLORREF backclr, foreclr
@@ -162,9 +162,11 @@ sub PsListBox_PaintCallback( byval p as PSLISTBOX_PAINTINFO ptr )
             p->b->PaintText( p->cells[c].wszText, @rcCell, DT_LEFT or DT_END_ELLIPSIS )
         next
     else
-        ' Single-column item row: normal font, indented under its header
+        ' Single-column item row. When tree indent is on (instance C) the control supplies the
+        ' real per-depth indent in p->indent (which already includes the twisty band); with it
+        ' off (instances A/B) it is 0, so fall back to the legacy fixed 16 -- A/B are unchanged.
         dim as RECT rcText = p->rc
-        rcText.left += 16
+        rcText.left += iif( p->indent > 0, p->indent, 16 )
         p->b->SetFont( ghFont(GUIFONT_10) )
         p->b->PaintText( p->wszCaption, @rcText, DT_LEFT )
     end if
@@ -178,6 +180,32 @@ sub PsListBox_PaintCallback( byval p as PSLISTBOX_PAINTINFO ptr )
     end if
 
 end sub
+
+' ========================================================================================
+' Tree edit / expand-collapse callbacks (demo). newText is byval DWSTRING (never byref const)
+' and is converted to a plain string BEFORE printing -- printing a DWSTRING directly
+' interleaves nulls (see CLAUDE.md / Learnings.md).
+' ========================================================================================
+function Tree_BeginLabelEdit( byval h as HWND, byval row as integer ) as boolean
+    return true                          ' allow every edit in the demo
+end function
+
+function Tree_EndLabelEdit( byval h as HWND, byval row as integer, byval newText as DWSTRING ) as boolean
+    dim as string s = newText            ' single conversion; do not print the DWSTRING directly
+    if len(trim(s)) = 0 then
+        print "  label edit REJECTED (blank), row " & str(row) & " keeps its text"
+        return false                     ' veto: the row keeps its old caption
+    end if
+    print "  row " & str(row) & " renamed to: " & s
+    return true
+end function
+
+sub Tree_ExpandCollapse( byval h as HWND, byval row as integer, byval bExpanded as boolean )
+    dim as string s = "  row " & str(row)
+    if bExpanded then s &= " EXPANDED" else s &= " COLLAPSED"
+    print s
+end sub
+
 
 ' Host-side sort state for instance B (the CONTROL never sorts; the header's click
 ' callback is just the hook). -1 = unsorted.
@@ -221,7 +249,7 @@ end function
 ' ========================================================================================
 sub Demo_SortInstanceB()
     dim as HWND h = HWND_FRMEXPLORER2
-    dim as integer n = PsListBox_GetCount( h )
+    dim as integer n = PsListTree_GetCount( h )
     if n <= 0 then return
 
     redim as boolean isHdr( 0 to n - 1 )
@@ -229,12 +257,12 @@ sub Demo_SortInstanceB()
     redim as string  c0( 0 to n - 1 ), c1( 0 to n - 1 ), c2( 0 to n - 1 )
     redim as integer dat( 0 to n - 1 )
     for i as integer = 0 to n - 1
-        isHdr(i) = PsListBox_IsHeader( h, i )
-        isCol(i) = PsListBox_IsCollapsed( h, i )
-        c0(i) = PsListBox_GetCellText( h, i, 0 )
-        c1(i) = PsListBox_GetCellText( h, i, 1 )
-        c2(i) = PsListBox_GetCellText( h, i, 2 )
-        dat(i) = PsListBox_GetItemData( h, i )
+        isHdr(i) = PsListTree_IsHeader( h, i )
+        isCol(i) = PsListTree_IsCollapsed( h, i )
+        c0(i) = PsListTree_GetCellText( h, i, 0 )
+        c1(i) = PsListTree_GetCellText( h, i, 1 )
+        c2(i) = PsListTree_GetCellText( h, i, 2 )
+        dat(i) = PsListTree_GetItemData( h, i )
     next
 
     ' Insertion-sort each header's item run in place.
@@ -269,20 +297,20 @@ sub Demo_SortInstanceB()
         i = last
     wend
 
-    PsListBox_BeginUpdate( h )
-    PsListBox_Clear( h )
+    PsListTree_BeginUpdate( h )
+    PsListTree_Clear( h )
     for i as integer = 0 to n - 1
         dim as integer r
         if isHdr(i) then
-            r = PsListBox_AddHeader( h, c0(i), dat(i) )
-            if isCol(i) then PsListBox_CollapseRow( h, r )
+            r = PsListTree_AddHeader( h, c0(i), dat(i) )
+            if isCol(i) then PsListTree_CollapseRow( h, r )
         else
-            r = PsListBox_AddString( h, c0(i), dat(i) )
-            if len(c1(i)) > 0 then PsListBox_SetCellText( h, r, 1, c1(i) )
-            if len(c2(i)) > 0 then PsListBox_SetCellText( h, r, 2, c2(i) )
+            r = PsListTree_AddString( h, c0(i), dat(i) )
+            if len(c1(i)) > 0 then PsListTree_SetCellText( h, r, 1, c1(i) )
+            if len(c2(i)) > 0 then PsListTree_SetCellText( h, r, 2, c2(i) )
         end if
     next
-    PsListBox_EndUpdate( h )
+    PsListTree_EndUpdate( h )
 end sub
 
 
@@ -386,12 +414,12 @@ end function
 
 
 ' ========================================================================================
-' Geometry/contract self-test (run with PSLISTBOX_SELFTEST=1). Asserts the column rect
+' Geometry/contract self-test (run with PSLISTTREE_SELFTEST=1). Asserts the column rect
 ' math, divider hit zones, and the painted cell contract -- captured from the REAL
 ' paint path, never re-derived (PsHScrollBar's self-test pattern).
 ' ========================================================================================
 dim shared gFailCount as integer = 0
-dim shared gSelfTestCells(any) as PSLISTBOX_CELLINFO
+dim shared gSelfTestCells(any) as PSLISTTREE_CELLINFO
 dim shared gSelfTestCellCount as integer = -1     ' -1 = capture never ran
 ' The row's OWN rect, captured alongside its cells. Rows are painted in the surface's
 ' client coordinates now, so "where is this row" is no longer a constant the test can
@@ -400,6 +428,12 @@ dim shared gSelfTestRowRc as RECT
 dim shared gSelfTestRowIsHeader as boolean = false
 dim shared gSelfTestRowIsSpanned as boolean = false
 dim shared gSelfTestWantRow as integer = -2       ' model row to capture; -2 = any row
+' Tree fields captured from the same PAINTINFO (added for the tree/edit self-test).
+dim shared gSelfTestLevel       as integer = -1
+dim shared gSelfTestHasChildren as boolean = false
+dim shared gSelfTestIsExpanded  as boolean = false
+dim shared gSelfTestIndent      as integer = -1
+dim shared gSelfTestTwistyRc    as RECT
 
 ' SelChange recorder: the callback fires only for USER-driven selection moves, so the
 ' self-test can assert both that it fires (keyboard) and that it does not (setters).
@@ -410,6 +444,14 @@ sub SelfTest_SelChange( byval hCtl as HWND, byval row as integer )
     gSelChangeCount += 1
     gSelChangeRow = row
 end sub
+
+' Edit-lifecycle test callbacks: one vetoes BeginEdit, one rejects the committed text.
+function SelfTest_VetoBegin( byval hCtl as HWND, byval row as integer ) as boolean
+    return false
+end function
+function SelfTest_RejectEnd( byval hCtl as HWND, byval row as integer, byval newText as DWSTRING ) as boolean
+    return false
+end function
 
 sub SelfTest_Check( byval sName as string, byval bOK as boolean, byval sDetail as string )
     dim as string s
@@ -425,12 +467,17 @@ end sub
 
 ' Swapped-in row paint callback: copies the requested model row's column info out of
 ' the live PAINTINFO (the pointer is only valid during the call, so deep-copy).
-sub SelfTest_RowCapturePaint( byval p as PSLISTBOX_PAINTINFO ptr )
+sub SelfTest_RowCapturePaint( byval p as PSLISTTREE_PAINTINFO ptr )
     if (gSelfTestWantRow <> -2) andalso (p->itemID <> gSelfTestWantRow) then exit sub
     gSelfTestCellCount   = p->columnCount
     gSelfTestRowIsHeader = p->isHeader
     gSelfTestRowIsSpanned = p->isSpanned
     gSelfTestRowRc       = p->rc
+    gSelfTestLevel       = p->level
+    gSelfTestHasChildren = p->hasChildren
+    gSelfTestIsExpanded  = p->isExpanded
+    gSelfTestIndent      = p->indent
+    gSelfTestTwistyRc    = p->rcTwisty
     if p->columnCount > 0 then
         redim gSelfTestCells( 0 to p->columnCount - 1 )
         for c as integer = 0 to p->columnCount - 1
@@ -451,16 +498,16 @@ end function
 ' Find the MODEL index of the first row whose itemData matches, or -1. Used by the drag
 ' self-test to track a row across reorders by identity rather than by a fixed index.
 function SelfTest_RowByData( byval hCtl as HWND, byval dataVal as integer ) as integer
-    for i as integer = 0 to PsListBox_GetCount( hCtl ) - 1
-        if PsListBox_GetItemData( hCtl, i ) = dataVal then return i
+    for i as integer = 0 to PsListTree_GetCount( hCtl ) - 1
+        if PsListTree_GetItemData( hCtl, i ) = dataVal then return i
     next
     return -1
 end function
 
 ' Find the MODEL index of the first header row with the given text, or -1.
 function SelfTest_HeaderByText( byval hCtl as HWND, byval sText as DWSTRING ) as integer
-    for i as integer = 0 to PsListBox_GetCount( hCtl ) - 1
-        if PsListBox_IsHeader( hCtl, i ) andalso (PsListBox_GetText( hCtl, i ) = sText) then return i
+    for i as integer = 0 to PsListTree_GetCount( hCtl ) - 1
+        if PsListTree_IsHeader( hCtl, i ) andalso (PsListTree_GetText( hCtl, i ) = sText) then return i
     next
     return -1
 end function
@@ -471,7 +518,7 @@ sub frmMain_RunSelfTest()
     dim pWindow as CWindow ptr = AfxCWindowPtr( hHdr )
 
     print ""
-    print "=== PsListBox columns/header self-test ==="
+    print "=== PsListTree columns/header self-test ==="
 
     ' ---- 1. Column rect math (widths 160 / 70 / fill on the live client width) ----
     dim as RECT rcC : GetClientRect( hHdr, @rcC )
@@ -493,14 +540,14 @@ sub frmMain_RunSelfTest()
     dim as integer minDefault = CCOLHDR_DEFAULT_MINWIDTH
     if pWindow then minDefault = pWindow->ScaleX( CCOLHDR_DEFAULT_MINWIDTH )
     dim as integer notifyBefore = gResizeNotifyCount
-    PsListBox_SetColumnWidth( hB, 1, 5 )
+    PsListTree_SetColumnWidth( hB, 1, 5 )
     SelfTest_Check( "SetColumnWidth clamps to scaled min", _
-        (PsListBox_GetColumnWidth( hB, 1 ) = minDefault), _
-        "w=" & str(PsListBox_GetColumnWidth( hB, 1 )) & " min=" & str(minDefault) )
+        (PsListTree_GetColumnWidth( hB, 1 ) = minDefault), _
+        "w=" & str(PsListTree_GetColumnWidth( hB, 1 )) & " min=" & str(minDefault) )
     SelfTest_Check( "programmatic width change is silent", _
         (gResizeNotifyCount = notifyBefore), _
         "notifies=" & str(gResizeNotifyCount - notifyBefore) )
-    PsListBox_SetColumnWidth( hB, 1, 70 )    ' restore
+    PsListTree_SetColumnWidth( hB, 1, 70 )    ' restore
 
     ' ---- 3. Divider hit zones: boundary +/- gutter hits, one past misses, and the
     '         fill column's own divider is never grabbable ----
@@ -525,7 +572,7 @@ sub frmMain_RunSelfTest()
 
     ' ---- 4. Painted cells: captured from the real paint path, equal to the
     '         header's rects, y spanning the row height; sparse cells read empty ----
-    PsListBox_SetPaintCallback( hB, @SelfTest_RowCapturePaint )
+    PsListTree_SetPaintCallback( hB, @SelfTest_RowCapturePaint )
     if SelfTest_GrabRow( hB, 1 ) then
         SelfTest_Check( "item row captures columnCount=3", (gSelfTestCellCount = 3), _
             "n=" & str(gSelfTestCellCount) )
@@ -563,11 +610,11 @@ sub frmMain_RunSelfTest()
         SelfTest_Check( "paint captured (item row)", false, "the row paint callback never ran" )
     end if
     SelfTest_Check( "sparse folder Size cell reads empty", _
-        (len(PsListBox_GetCellText( hB, 43, 1 )) = 0), _
-        "len=" & str(len(PsListBox_GetCellText( hB, 43, 1 ))) )
+        (len(PsListTree_GetCellText( hB, 43, 1 )) = 0), _
+        "len=" & str(len(PsListTree_GetCellText( hB, 43, 1 ))) )
 
     ' ---- 5. A width change reflows the painted cells ----
-    PsListBox_SetColumnWidth( hB, 0, 150 )
+    PsListTree_SetColumnWidth( hB, 0, 150 )
     if SelfTest_GrabRow( hB, 1 ) then
         dim as boolean okW = (gSelfTestCellCount = 3)
         if okW then okW = (gSelfTestCells(1).rc.left = 150)
@@ -576,7 +623,7 @@ sub frmMain_RunSelfTest()
     else
         SelfTest_Check( "paint captured (width reflow)", false, "the row paint callback never ran" )
     end if
-    PsListBox_SetColumnWidth( hB, 0, 160 )   ' restore
+    PsListTree_SetColumnWidth( hB, 0, 160 )   ' restore
 
     ' ---- 6. Group-header rows span the full width (columnCount = 0) ----
     if SelfTest_GrabRow( hB, 0 ) then
@@ -589,7 +636,7 @@ sub frmMain_RunSelfTest()
     end if
 
     ' ---- 7. Instance A (no columns): the pre-columns contract, proven not assumed ----
-    PsListBox_SetPaintCallback( HWND_FRMEXPLORER, @SelfTest_RowCapturePaint )
+    PsListTree_SetPaintCallback( HWND_FRMEXPLORER, @SelfTest_RowCapturePaint )
     if SelfTest_GrabRow( HWND_FRMEXPLORER, -2 ) then
         SelfTest_Check( "no-columns instance captures columnCount=0", _
             (gSelfTestCellCount = 0), "n=" & str(gSelfTestCellCount) )
@@ -600,17 +647,17 @@ sub frmMain_RunSelfTest()
     ' ---- 7b. SelChange: fires for user-driven moves ONLY, and never twice for the same
     '          row. The keyboard case is the reason the callback exists at all -- the
     '          control consumes WM_KEYDOWN, so nothing else can observe arrow navigation.
-    PsListBox_SetSelChangeCallback( hB, @SelfTest_SelChange )
+    PsListTree_SetSelChangeCallback( hB, @SelfTest_SelChange )
     dim as HWND hInner = GetDlgItem( hB, IDC_FRMMAIN_LISTBOX )
 
     gSelChangeCount = 0
-    PsListBox_SetCurSel( hB, 2 )
+    PsListTree_SetCurSel( hB, 2 )
     SelfTest_Check( "SetCurSel is silent", (gSelChangeCount = 0), _
         "fires=" & str(gSelChangeCount) )
 
     gSelChangeCount = 0
     SendMessage( hInner, WM_KEYDOWN, VK_DOWN, 0 )
-    dim as integer rowAfterDown = PsListBox_GetCurSel( hB )
+    dim as integer rowAfterDown = PsListTree_GetCurSel( hB )
     SelfTest_Check( "VK_DOWN fires exactly once", (gSelChangeCount = 1), _
         "fires=" & str(gSelChangeCount) )
     SelfTest_Check( "SelChange row = GetCurSel", (gSelChangeRow = rowAfterDown), _
@@ -625,19 +672,19 @@ sub frmMain_RunSelfTest()
 
     ' Re-setting the row that is already current must stay silent.
     gSelChangeCount = 0
-    PsListBox_SetCurSel( hB, PsListBox_GetCurSel( hB ) )
+    PsListTree_SetCurSel( hB, PsListTree_GetCurSel( hB ) )
     SelfTest_Check( "SetCurSel to the current row is silent", (gSelChangeCount = 0), _
         "fires=" & str(gSelChangeCount) )
 
     ' Clamped navigation does not move the focus, so it must not notify either.
-    PsListBox_SetCurSel( hB, 0 )
+    PsListTree_SetCurSel( hB, 0 )
     gSelChangeCount = 0
     SendMessage( hInner, WM_KEYDOWN, VK_UP, 0 )
     SelfTest_Check( "VK_UP clamped at the top is silent", (gSelChangeCount = 0), _
-        "fires=" & str(gSelChangeCount) & " row=" & str(PsListBox_GetCurSel(hB)) )
+        "fires=" & str(gSelChangeCount) & " row=" & str(PsListTree_GetCurSel(hB)) )
 
     ' A host that never sets the callback must be unaffected.
-    PsListBox_SetSelChangeCallback( hB, 0 )
+    PsListTree_SetSelChangeCallback( hB, 0 )
     gSelChangeCount = 0
     SendMessage( hInner, WM_KEYDOWN, VK_DOWN, 0 )
     SelfTest_Check( "cleared callback stops firing", (gSelChangeCount = 0), _
@@ -645,12 +692,12 @@ sub frmMain_RunSelfTest()
 
     ' ---- 7c. Spanned row: an ordinary item row painted as ONE cell across the whole
     '          column band, its text kept in column 0, with a clean round-trip back ----
-    PsListBox_SetPaintCallback( hB, @SelfTest_RowCapturePaint )   ' 7b left SelChange only
-    dim as DWSTRING sSpanText = PsListBox_GetText( hB, 2 )
+    PsListTree_SetPaintCallback( hB, @SelfTest_RowCapturePaint )   ' 7b left SelChange only
+    dim as DWSTRING sSpanText = PsListTree_GetText( hB, 2 )
     SelfTest_Check( "SetRowSpanColumns returns TRUE", _
-        PsListBox_SetRowSpanColumns( hB, 2, true ), "" )
+        PsListTree_SetRowSpanColumns( hB, 2, true ), "" )
     SelfTest_Check( "GetRowSpanColumns reflects the setter", _
-        PsListBox_GetRowSpanColumns( hB, 2 ), "" )
+        PsListTree_GetRowSpanColumns( hB, 2 ), "" )
     if SelfTest_GrabRow( hB, 2 ) then
         SelfTest_Check( "spanned row captures columnCount=1", (gSelfTestCellCount = 1), _
             "n=" & str(gSelfTestCellCount) )
@@ -676,7 +723,7 @@ sub frmMain_RunSelfTest()
         SelfTest_Check( "paint captured (spanned row)", false, "the row paint callback never ran" )
     end if
     ' Round-trip: clearing the flag restores the per-column contract.
-    PsListBox_SetRowSpanColumns( hB, 2, false )
+    PsListTree_SetRowSpanColumns( hB, 2, false )
     if SelfTest_GrabRow( hB, 2 ) then
         SelfTest_Check( "clearing span restores columnCount=3 and isSpanned=false", _
             (gSelfTestCellCount = 3) andalso (gSelfTestRowIsSpanned = false), _
@@ -689,51 +736,51 @@ sub frmMain_RunSelfTest()
     '          keyboard skips them, and the programmatic setters refuse them), and marking a
     '          live row non-selectable clears its selection/focus ----
     '  Rows 4..7 are file items (Files group expanded); row 5 is the guinea pig.
-    PsListBox_SetCurSel( hB, 4 )
+    PsListTree_SetCurSel( hB, 4 )
     SelfTest_Check( "SetRowSelectable returns TRUE", _
-        PsListBox_SetRowSelectable( hB, 5, false ), "" )
+        PsListTree_SetRowSelectable( hB, 5, false ), "" )
     SelfTest_Check( "GetRowSelectable reflects the setter", _
-        (PsListBox_GetRowSelectable( hB, 5 ) = false), "" )
+        (PsListTree_GetRowSelectable( hB, 5 ) = false), "" )
 
     ' Keyboard DOWN from row 4 skips the non-selectable row 5 and lands on row 6.
     gSelChangeCount = 0
     SendMessage( hInner, WM_KEYDOWN, VK_DOWN, 0 )
     SelfTest_Check( "VK_DOWN skips the non-selectable row", _
-        (PsListBox_GetCurSel( hB ) = 6), "cur=" & str(PsListBox_GetCurSel( hB )) )
+        (PsListTree_GetCurSel( hB ) = 6), "cur=" & str(PsListTree_GetCurSel( hB )) )
     ' UP from row 6 skips it again, back to row 4.
     SendMessage( hInner, WM_KEYDOWN, VK_UP, 0 )
     SelfTest_Check( "VK_UP skips it back to row 4", _
-        (PsListBox_GetCurSel( hB ) = 4), "cur=" & str(PsListBox_GetCurSel( hB )) )
+        (PsListTree_GetCurSel( hB ) = 4), "cur=" & str(PsListTree_GetCurSel( hB )) )
 
     ' Programmatic setters refuse it, and leave the current row untouched.
-    dim as integer retSetCur = PsListBox_SetCurSel( hB, 5 )
+    dim as integer retSetCur = PsListTree_SetCurSel( hB, 5 )
     SelfTest_Check( "SetCurSel on a non-selectable row returns -1", _
         (retSetCur = -1), "ret=" & str(retSetCur) )
     SelfTest_Check( "...and the current row is unchanged", _
-        (PsListBox_GetCurSel( hB ) = 4), "cur=" & str(PsListBox_GetCurSel( hB )) )
+        (PsListTree_GetCurSel( hB ) = 4), "cur=" & str(PsListTree_GetCurSel( hB )) )
     SelfTest_Check( "SetSel(true) on a non-selectable row returns FALSE", _
-        (PsListBox_SetSel( hB, 5, true ) = false), "" )
+        (PsListTree_SetSel( hB, 5, true ) = false), "" )
     SelfTest_Check( "...and it did not become selected", _
-        (PsListBox_GetSel( hB, 5 ) = false), "" )
-    PsListBox_SelectAll( hB, true )
+        (PsListTree_GetSel( hB, 5 ) = false), "" )
+    PsListTree_SelectAll( hB, true )
     SelfTest_Check( "SelectAll skips the non-selectable row", _
-        (PsListBox_GetSel( hB, 5 ) = false), "" )
+        (PsListTree_GetSel( hB, 5 ) = false), "" )
     SelfTest_Check( "...but selects a selectable neighbour", _
-        (PsListBox_GetSel( hB, 4 ) = true), "" )
-    PsListBox_SelectAll( hB, false )
+        (PsListTree_GetSel( hB, 4 ) = true), "" )
+    PsListTree_SelectAll( hB, false )
 
     ' Marking a currently selected+focused row non-selectable clears it and drops the caret.
-    PsListBox_SetCurSel( hB, 7 )
-    PsListBox_SetRowSelectable( hB, 7, false )
+    PsListTree_SetCurSel( hB, 7 )
+    PsListTree_SetRowSelectable( hB, 7, false )
     SelfTest_Check( "making the focused row non-selectable deselects it", _
-        (PsListBox_GetSel( hB, 7 ) = false), "" )
+        (PsListTree_GetSel( hB, 7 ) = false), "" )
     SelfTest_Check( "...and drops the caret (GetCurSel = -1)", _
-        (PsListBox_GetCurSel( hB ) = -1), "cur=" & str(PsListBox_GetCurSel( hB )) )
+        (PsListTree_GetCurSel( hB ) = -1), "cur=" & str(PsListTree_GetCurSel( hB )) )
 
     ' Round-trip: re-enabling restores normal behaviour.
-    PsListBox_SetRowSelectable( hB, 5, true )
-    PsListBox_SetRowSelectable( hB, 7, true )
-    dim as integer retReenabled = PsListBox_SetCurSel( hB, 5 )
+    PsListTree_SetRowSelectable( hB, 5, true )
+    PsListTree_SetRowSelectable( hB, 7, true )
+    dim as integer retReenabled = PsListTree_SetCurSel( hB, 5 )
     SelfTest_Check( "re-enabled row selects again", _
         (retReenabled = 5), "ret=" & str(retReenabled) )
 
@@ -745,52 +792,52 @@ sub frmMain_RunSelfTest()
     '          but it shares the same model-level guard as SelectAll/SetSel, asserted above.)
     dim as HWND hA = HWND_FRMEXPLORER
     dim as HWND hInnerA = GetDlgItem( hA, IDC_FRMMAIN_LISTBOX )
-    PsListBox_SetCurSel( hA, 1 )
+    PsListTree_SetCurSel( hA, 1 )
     SendMessage( hInnerA, WM_KEYDOWN, VK_UP, 0 )
     SelfTest_Check( "Up from row 1 stays put (row 0 non-selectable, nothing above)", _
-        (PsListBox_GetCurSel( hA ) = 1), "cur=" & str(PsListBox_GetCurSel( hA )) )
+        (PsListTree_GetCurSel( hA ) = 1), "cur=" & str(PsListTree_GetCurSel( hA )) )
     SendMessage( hInnerA, WM_KEYDOWN, VK_HOME, 0 )
     SelfTest_Check( "Home skips the leading non-selectable row 0 -> row 1", _
-        (PsListBox_GetCurSel( hA ) = 1), "cur=" & str(PsListBox_GetCurSel( hA )) )
-    PsListBox_SetCurSel( hA, 7 )
+        (PsListTree_GetCurSel( hA ) = 1), "cur=" & str(PsListTree_GetCurSel( hA )) )
+    PsListTree_SetCurSel( hA, 7 )
     SendMessage( hInnerA, WM_KEYDOWN, VK_DOWN, 0 )
     SelfTest_Check( "Down from row 7 skips non-selectable row 8 -> row 9", _
-        (PsListBox_GetCurSel( hA ) = 9), "cur=" & str(PsListBox_GetCurSel( hA )) )
+        (PsListTree_GetCurSel( hA ) = 9), "cur=" & str(PsListTree_GetCurSel( hA )) )
     SendMessage( hInnerA, WM_KEYDOWN, VK_UP, 0 )
     SelfTest_Check( "Up from row 9 skips row 8 -> row 7", _
-        (PsListBox_GetCurSel( hA ) = 7), "cur=" & str(PsListBox_GetCurSel( hA )) )
-    PsListBox_SetCurSel( hA, 1 )   ' restore
+        (PsListTree_GetCurSel( hA ) = 7), "cur=" & str(PsListTree_GetCurSel( hA )) )
+    PsListTree_SetCurSel( hA, 1 )   ' restore
 
     ' ---- 8. DESTRUCTIVE (last): column delete/insert shift the per-row cells across
     '         the Text<->cells(0) alias, the fill designation self-heals, and a SPANNED
     '         row is EXEMPT from the shift (its text stays in column 0) ----
-    dim as DWSTRING sSpanKeep = PsListBox_GetText( hB, 2 )
-    PsListBox_SetRowSpanColumns( hB, 2, true )
-    PsListBox_DeleteColumn( hB, 2 )
+    dim as DWSTRING sSpanKeep = PsListTree_GetText( hB, 2 )
+    PsListTree_SetRowSpanColumns( hB, 2, true )
+    PsListTree_DeleteColumn( hB, 2 )
     SelfTest_Check( "delete fill col -> effective fill = last (1)", _
-        (PsListBox_GetFillColumn( hB ) = 1), "fill=" & str(PsListBox_GetFillColumn( hB )) )
+        (PsListTree_GetFillColumn( hB ) = 1), "fill=" & str(PsListTree_GetFillColumn( hB )) )
     SelfTest_Check( "deleted column's cells removed", _
-        (len(PsListBox_GetCellText( hB, 1, 2 )) = 0), _
-        "len=" & str(len(PsListBox_GetCellText( hB, 1, 2 ))) )
-    dim as string sSize = PsListBox_GetCellText( hB, 1, 1 )
+        (len(PsListTree_GetCellText( hB, 1, 2 )) = 0), _
+        "len=" & str(len(PsListTree_GetCellText( hB, 1, 2 ))) )
+    dim as string sSize = PsListTree_GetCellText( hB, 1, 1 )
     SelfTest_Check( "cells before the deleted column survive", (sSize = "137"), "c1=" & sSize )
-    PsListBox_InsertColumn( hB, 0, "Icon", 40 )
-    dim as string sShift0 = PsListBox_GetCellText( hB, 1, 0 )
-    dim as string sShift1 = PsListBox_GetCellText( hB, 1, 1 )
+    PsListTree_InsertColumn( hB, 0, "Icon", 40 )
+    dim as string sShift0 = PsListTree_GetCellText( hB, 1, 0 )
+    dim as string sShift1 = PsListTree_GetCellText( hB, 1, 1 )
     dim as boolean okIns = (len(sShift0) = 0) andalso (sShift1 = "file0.bas")
     SelfTest_Check( "insert at 0 shifts Text into column 1", okIns, _
         "c0len=" & str(len(sShift0)) & " c1=" & sShift1 )
 
     ' The spanned row rode through both a DeleteColumn and an InsertColumn(0) with its
-    ' text untouched in column 0 -- the exemption at PsListBox_ShiftCellColumns. Without
+    ' text untouched in column 0 -- the exemption at PsListTree_ShiftCellColumns. Without
     ' it the insert-at-0 would have pushed the caption into column 1 (as it did for row 1
     ' above) and the spanned row would silently paint blank.
     SelfTest_Check( "spanned row is exempt from column shifts", _
-        (PsListBox_GetText( hB, 2 ) = sSpanKeep), _
-        "keep=" & str(len(sSpanKeep)) & " now=" & str(len(PsListBox_GetText( hB, 2 ))) )
-    PsListBox_SetRowSpanColumns( hB, 2, false )
+        (PsListTree_GetText( hB, 2 ) = sSpanKeep), _
+        "keep=" & str(len(sSpanKeep)) & " now=" & str(len(PsListTree_GetText( hB, 2 ))) )
+    PsListTree_SetRowSpanColumns( hB, 2, false )
 
-    ' ---- 9. Drag-reorder MODEL move (PsListBox_MoveRows). The gesture itself -- capture,
+    ' ---- 9. Drag-reorder MODEL move (PsListTree_MoveRows). The gesture itself -- capture,
     '         threshold, indicator, auto-scroll, CanDrop veto -- is interactive-only (capture
     '         can't be synthesized; see Learnings.md); these assert the reorder index math on
     '         instance A, tracking rows by itemData so a move never confuses the next check.
@@ -800,21 +847,21 @@ sub frmMain_RunSelfTest()
 
     ' 9a. Single row to the end: itemData 1000 ("Alpha item 0") lands last; focus follows.
     dim as integer r1000 = SelfTest_RowByData( hMv, 1000 )
-    dim as integer cntA  = PsListBox_GetCount( hMv )
+    dim as integer cntA  = PsListTree_GetCount( hMv )
     redim srcMv( 0 to 0 ) : srcMv(0) = r1000
-    dim as integer nf9a = PsListBox_MoveRows( hMv, srcMv(), cntA )
+    dim as integer nf9a = PsListTree_MoveRows( hMv, srcMv(), cntA )
     SelfTest_Check( "MoveRows single -> last row, returns its index", _
         (nf9a = cntA - 1) andalso (SelfTest_RowByData( hMv, 1000 ) = cntA - 1), _
         "nf=" & str(nf9a) & " at=" & str(SelfTest_RowByData( hMv, 1000 )) )
     SelfTest_Check( "MoveRows puts the caret on the moved block", _
-        (PsListBox_GetCurSel( hMv ) = nf9a), "cur=" & str(PsListBox_GetCurSel( hMv )) )
+        (PsListTree_GetCurSel( hMv ) = nf9a), "cur=" & str(PsListTree_GetCurSel( hMv )) )
 
     ' 9b. Non-contiguous pair gathers contiguously, in original order, before the target.
     dim as integer p1001 = SelfTest_RowByData( hMv, 1001 )
     dim as integer p1003 = SelfTest_RowByData( hMv, 1003 )
     dim as integer tgt2000 = SelfTest_RowByData( hMv, 2000 )
     redim srcMv( 0 to 1 ) : srcMv(0) = p1001 : srcMv(1) = p1003
-    PsListBox_MoveRows( hMv, srcMv(), tgt2000 )
+    PsListTree_MoveRows( hMv, srcMv(), tgt2000 )
     dim as integer q1001 = SelfTest_RowByData( hMv, 1001 )
     dim as integer q1003 = SelfTest_RowByData( hMv, 1003 )
     SelfTest_Check( "MoveRows gathers a non-contiguous pair, order kept", _
@@ -827,46 +874,267 @@ sub frmMain_RunSelfTest()
     dim as integer hBeta = SelfTest_HeaderByText( hMv, "Group Beta" )
     dim as integer r1002 = SelfTest_RowByData( hMv, 1002 )
     redim srcMv( 0 to 0 ) : srcMv(0) = r1002
-    PsListBox_MoveRows( hMv, srcMv(), hBeta + 1 )
+    PsListTree_MoveRows( hMv, srcMv(), hBeta + 1 )
     SelfTest_Check( "MoveRows onto header -> first child", _
         (SelfTest_RowByData( hMv, 1002 ) = SelfTest_HeaderByText( hMv, "Group Beta" ) + 1), _
         "1002@" & str(SelfTest_RowByData( hMv, 1002 )) & " beta@" & str(SelfTest_HeaderByText( hMv, "Group Beta" )) )
 
     ' 9d. Selection travels with a moved row (it lives on the struct).
     dim as integer r1006 = SelfTest_RowByData( hMv, 1006 )
-    PsListBox_SetSel( hMv, r1006, true )
+    PsListTree_SetSel( hMv, r1006, true )
     redim srcMv( 0 to 0 ) : srcMv(0) = r1006
-    dim as integer nf9d = PsListBox_MoveRows( hMv, srcMv(), PsListBox_GetCount( hMv ) )
+    dim as integer nf9d = PsListTree_MoveRows( hMv, srcMv(), PsListTree_GetCount( hMv ) )
     SelfTest_Check( "moved row keeps its selection", _
-        (nf9d >= 0) andalso PsListBox_GetSel( hMv, nf9d ), "nf=" & str(nf9d) )
+        (nf9d >= 0) andalso PsListTree_GetSel( hMv, nf9d ), "nf=" & str(nf9d) )
 
     ' 9e. A header in the source set is ignored (structural rows never move).
     dim as integer hBeta2 = SelfTest_HeaderByText( hMv, "Group Beta" )
     dim as integer r2001  = SelfTest_RowByData( hMv, 2001 )
-    dim as integer cntB4  = PsListBox_GetCount( hMv )
+    dim as integer cntB4  = PsListTree_GetCount( hMv )
     redim srcMv( 0 to 1 ) : srcMv(0) = hBeta2 : srcMv(1) = r2001
-    PsListBox_MoveRows( hMv, srcMv(), 3 )
+    PsListTree_MoveRows( hMv, srcMv(), 3 )
     SelfTest_Check( "header in the source set is ignored", _
-        (SelfTest_HeaderByText( hMv, "Group Beta" ) >= 0) andalso (PsListBox_GetCount( hMv ) = cntB4), _
-        "beta@" & str(SelfTest_HeaderByText( hMv, "Group Beta" )) & " cnt=" & str(PsListBox_GetCount( hMv )) )
+        (SelfTest_HeaderByText( hMv, "Group Beta" ) >= 0) andalso (PsListTree_GetCount( hMv ) = cntB4), _
+        "beta@" & str(SelfTest_HeaderByText( hMv, "Group Beta" )) & " cnt=" & str(PsListTree_GetCount( hMv )) )
 
     ' 9f. MoveRows moves a NON-SELECTABLE item too: the no-drag rule is a gesture property,
     '     not a model one, so the programmatic primitive is unrestricted (headers aside).
     dim as integer r1005 = SelfTest_RowByData( hMv, 1005 )   ' "Alpha item 5", non-selectable
     redim srcMv( 0 to 0 ) : srcMv(0) = r1005
-    PsListBox_MoveRows( hMv, srcMv(), PsListBox_GetCount( hMv ) )
+    PsListTree_MoveRows( hMv, srcMv(), PsListTree_GetCount( hMv ) )
     SelfTest_Check( "MoveRows moves a non-selectable item (gesture-only restriction)", _
-        (SelfTest_RowByData( hMv, 1005 ) = PsListBox_GetCount( hMv ) - 1), _
+        (SelfTest_RowByData( hMv, 1005 ) = PsListTree_GetCount( hMv ) - 1), _
         "1005@" & str(SelfTest_RowByData( hMv, 1005 )) )
+
+    ' ====================================================================================
+    ' 10. TREE + IN-PLACE EDITING (instance C). C is the AddNode tree built in WinMain,
+    '     with tree indent + control-drawn twisties on. Model layout (before any collapse):
+    '       0 src(L0)  1 AfxNova(L1)  2 CWindow.inc(L2)  3 controls(L2)  4 PsListTree.inc(L3)
+    '       5 PsTextBox.inc(L3)  6 AfxStr.inc(L2)  7 demo(L1)  8 main.bas(L2)  9 frmMain.inc(L2)
+    '      10 docs(L0)  11 README.md(L1)  12 REFACTOR_PLAN.md(L1)  13 LICENSE(L0 leaf)
+    ' ====================================================================================
+    dim as HWND hC = HWND_FRMEXPLORER3
+
+    ' ---- 10a. Derived tree structure (works on real AddNode depth) ----
+    SelfTest_Check( "GetLevel(src)=0 / GetLevel(controls)=2 / GetLevel(PsListTree.inc)=3", _
+        (PsListTree_GetLevel(hC,0)=0) andalso (PsListTree_GetLevel(hC,3)=2) andalso (PsListTree_GetLevel(hC,4)=3), _
+        "L0=" & str(PsListTree_GetLevel(hC,0)) & " L3=" & str(PsListTree_GetLevel(hC,3)) & " L4=" & str(PsListTree_GetLevel(hC,4)) )
+    SelfTest_Check( "HasChildren: src=T, CWindow.inc(leaf)=F", _
+        (PsListTree_HasChildren(hC,0) = true) andalso (PsListTree_HasChildren(hC,2) = false), "" )
+    SelfTest_Check( "GetChildCount: src=2 (AfxNova,demo), AfxNova=3", _
+        (PsListTree_GetChildCount(hC,0)=2) andalso (PsListTree_GetChildCount(hC,1)=3), _
+        "src=" & str(PsListTree_GetChildCount(hC,0)) & " afx=" & str(PsListTree_GetChildCount(hC,1)) )
+    SelfTest_Check( "GetParent: PsListTree.inc->controls(3), src->-1", _
+        (PsListTree_GetParent(hC,4)=3) andalso (PsListTree_GetParent(hC,0)=-1), _
+        "p4=" & str(PsListTree_GetParent(hC,4)) & " p0=" & str(PsListTree_GetParent(hC,0)) )
+
+    ' ---- 10b. Subtree collapse hides an ENTIRE subtree at any depth ----
+    PsListTree_ExpandAll( hC )
+    dim as integer visAll = PsListTree_GetVisibleCount( hC )
+    SelfTest_Check( "ExpandAll -> all 14 nodes visible", (visAll = 14), "vis=" & str(visAll) )
+    PsListTree_CollapseRow( hC, 3 )                      ' controls (L2): hides PsListTree.inc + PsTextBox.inc
+    SelfTest_Check( "collapse a depth-2 node hides its 2 children -> 12", _
+        (PsListTree_GetVisibleCount(hC) = 12), "vis=" & str(PsListTree_GetVisibleCount(hC)) )
+    PsListTree_ExpandRow( hC, 3 )
+    SelfTest_Check( "expand it back -> 14", (PsListTree_GetVisibleCount(hC) = 14), _
+        "vis=" & str(PsListTree_GetVisibleCount(hC)) )
+    PsListTree_CollapseRow( hC, 1 )                      ' AfxNova (L1): hides its whole 5-node subtree
+    SelfTest_Check( "collapse a depth-1 node hides its whole subtree (5) -> 9", _
+        (PsListTree_GetVisibleCount(hC) = 9), "vis=" & str(PsListTree_GetVisibleCount(hC)) )
+    PsListTree_CollapseRow( hC, 0 )                      ' src (L0): nested collapse, hides all under src
+    SelfTest_Check( "collapse the root over an already-collapsed child -> 5 (roots + docs)", _
+        (PsListTree_GetVisibleCount(hC) = 5), "vis=" & str(PsListTree_GetVisibleCount(hC)) )
+    PsListTree_ExpandAll( hC )
+    SelfTest_Check( "ExpandAll restores 14", (PsListTree_GetVisibleCount(hC) = 14), _
+        "vis=" & str(PsListTree_GetVisibleCount(hC)) )
+
+    ' ---- 10c. Indent + twisty GEOMETRY, captured from the REAL paint path ----
+    dim pWinC as CWindow ptr = AfxCWindowPtr( hC )
+    dim as integer indentPx = pWinC->ScaleX( PsListTree_GetIndentWidth(hC) )   ' 16 -> DPI px
+    dim as integer twistyPx = pWinC->ScaleX( 16 )                             ' TwistyWidth default 16
+    PsListTree_SetPaintCallback( hC, @SelfTest_RowCapturePaint )
+    ' Root parent (src, L0): indent = 0*indent + twisty band; twisty at x=0, width = twistyPx.
+    if SelfTest_GrabRow( hC, 0 ) then
+        SelfTest_Check( "L0 parent: level=0, hasChildren, indent = twistyPx", _
+            (gSelfTestLevel=0) andalso (gSelfTestHasChildren = true) andalso (gSelfTestIndent = twistyPx), _
+            "lvl=" & str(gSelfTestLevel) & " indent=" & str(gSelfTestIndent) & " twistyPx=" & str(twistyPx) )
+        SelfTest_Check( "L0 twisty rect: left=0, width=twistyPx", _
+            (gSelfTestTwistyRc.left = 0) andalso ((gSelfTestTwistyRc.right - gSelfTestTwistyRc.left) = twistyPx), _
+            "tw=[" & str(gSelfTestTwistyRc.left) & ".." & str(gSelfTestTwistyRc.right) & "]" )
+    else
+        SelfTest_Check( "paint captured (C row 0)", false, "row 0 never painted" )
+    end if
+    ' Depth-2 parent (controls, model row 3): indent = 2*indent + twisty; twisty.left = 2*indent.
+    if SelfTest_GrabRow( hC, 3 ) then
+        SelfTest_Check( "L2 parent: level=2, hasChildren, indent = 2*indentPx + twistyPx", _
+            (gSelfTestLevel=2) andalso (gSelfTestHasChildren = true) andalso (gSelfTestIndent = 2*indentPx + twistyPx), _
+            "indent=" & str(gSelfTestIndent) & " expect=" & str(2*indentPx + twistyPx) )
+        SelfTest_Check( "L2 twisty rect: left = 2*indentPx, width = twistyPx", _
+            (gSelfTestTwistyRc.left = 2*indentPx) andalso ((gSelfTestTwistyRc.right - gSelfTestTwistyRc.left) = twistyPx), _
+            "tw.left=" & str(gSelfTestTwistyRc.left) & " expect=" & str(2*indentPx) )
+    else
+        SelfTest_Check( "paint captured (C row 3)", false, "row 3 never painted" )
+    end if
+    ' Leaf (CWindow.inc, model row 2): no twisty, hasChildren=false, but still indented by depth.
+    if SelfTest_GrabRow( hC, 2 ) then
+        SelfTest_Check( "L2 leaf: hasChildren=false and EMPTY twisty rect", _
+            (gSelfTestHasChildren = false) andalso (gSelfTestTwistyRc.right = gSelfTestTwistyRc.left), _
+            "hasCh=" & str(gSelfTestHasChildren) & " twW=" & str(gSelfTestTwistyRc.right - gSelfTestTwistyRc.left) )
+        SelfTest_Check( "L2 leaf still indented: indent = 2*indentPx + twistyPx (band reserved)", _
+            (gSelfTestIndent = 2*indentPx + twistyPx), "indent=" & str(gSelfTestIndent) )
+    else
+        SelfTest_Check( "paint captured (C row 2)", false, "row 2 never painted" )
+    end if
+    PsListTree_SetPaintCallback( hC, @PsListTree_PaintCallback )     ' restore
+
+    ' ---- 10d. FLAT-LIST IDENTITY: with tree visuals OFF (instance A), indent is 0 and the
+    '           twisty rect is empty -- the proof that existing hosts are visually untouched. ----
+    PsListTree_SetPaintCallback( hA, @SelfTest_RowCapturePaint )
+    if SelfTest_GrabRow( hA, 1 ) then
+        SelfTest_Check( "tree visuals OFF: indent = 0 and twisty rect empty", _
+            (gSelfTestIndent = 0) andalso (gSelfTestTwistyRc.right = gSelfTestTwistyRc.left), _
+            "indent=" & str(gSelfTestIndent) & " twW=" & str(gSelfTestTwistyRc.right - gSelfTestTwistyRc.left) )
+    else
+        SelfTest_Check( "paint captured (A row 1)", false, "row 1 never painted" )
+    end if
+    PsListTree_SetPaintCallback( hA, @PsListTree_PaintCallback )     ' restore
+
+    ' ---- 10d2. COLUMN-0-ONLY inset: in report (columns) mode the tree indent shifts ONLY
+    '            cell 0; the other columns keep their x. Exercised on instance B (which has
+    '            columns) by toggling tree indent and comparing the captured cell rects. This
+    '            is the one inset path instance C (no columns) cannot reach. ----
+    dim pWinB as CWindow ptr = AfxCWindowPtr( hB )
+    PsListTree_SetPaintCallback( hB, @SelfTest_RowCapturePaint )
+    dim as integer base0 = -1, base1 = -1, on0 = -1, on1 = -1
+    if (SelfTest_GrabRow( hB, 1 ) = true) andalso (gSelfTestCellCount >= 2) then      ' row 1 is a level-1 file item
+        base0 = gSelfTestCells(0).rc.left
+        base1 = gSelfTestCells(1).rc.left
+    end if
+    PsListTree_SetTreeIndent( hB, true )
+    dim as integer bIndent = pWinB->ScaleX( PsListTree_GetIndentWidth(hB) )
+    if (SelfTest_GrabRow( hB, 1 ) = true) andalso (gSelfTestCellCount >= 2) then
+        on0 = gSelfTestCells(0).rc.left
+        on1 = gSelfTestCells(1).rc.left
+    end if
+    PsListTree_SetTreeIndent( hB, false )
+    PsListTree_SetPaintCallback( hB, @PsListTree_PaintCallback )
+    SelfTest_Check( "columns mode: tree indent shifts ONLY cell 0 (by 1 level), cell 1 fixed", _
+        (on0 = base0 + bIndent) andalso (on1 = base1), _
+        "c0 " & str(base0) & "->" & str(on0) & " (+" & str(bIndent) & ")  c1 " & str(base1) & "->" & str(on1) )
+
+    ' ---- 10e. LEGACY HEADER+ITEM byte-compat: a legacy header IS a depth-1 parent, so the
+    '           tree queries work on it and collapsing it still hides exactly its items. ----
+    dim as integer hBetaC = SelfTest_HeaderByText( hMv, "Group Beta" )
+    if hBetaC >= 0 then
+        dim as integer betaKids = PsListTree_GetChildCount( hMv, hBetaC )    ' NEW API on a LEGACY header
+        SelfTest_Check( "GetChildCount works on a legacy header", (betaKids > 0), "kids=" & str(betaKids) )
+        PsListTree_ExpandRow( hMv, hBetaC )
+        dim as integer visBefore = PsListTree_GetVisibleCount( hMv )
+        PsListTree_CollapseRow( hMv, hBetaC )
+        dim as integer hidden = visBefore - PsListTree_GetVisibleCount( hMv )
+        SelfTest_Check( "collapsing a legacy header hides EXACTLY its child count", _
+            (hidden = betaKids), "hidden=" & str(hidden) & " kids=" & str(betaKids) )
+        PsListTree_ExpandRow( hMv, hBetaC )
+        SelfTest_Check( "expanding it restores the visible count", _
+            (PsListTree_GetVisibleCount(hMv) = visBefore), "vis=" & str(PsListTree_GetVisibleCount(hMv)) )
+    else
+        SelfTest_Check( "legacy Group Beta header located", false, "not found" )
+    end if
+
+    ' ---- 10f. In-place EDIT lifecycle (no message pump needed). The editor is a PsTextBox
+    '           child of the surface with control id idc_ListTree+3, so the test can drive its
+    '           text directly. ----
+    dim as HWND hSurfC = GetDlgItem( hC, IDC_FRMMAIN_LISTBOX )
+    ' Accept path: begin, drive text, commit -> model updated. Sub-conditions are hoisted to
+    ' boolean locals so no andalso chain mixes a boolean with an integer relational (warning 38).
+    dim as boolean okBegin = PsListTree_BeginEdit( hC, 0 )
+    dim as boolean okEditing = PsListTree_IsEditing( hC )
+    dim as boolean okEditRow = (PsListTree_GetEditRow(hC) = 0)
+    SelfTest_Check( "BeginEdit -> IsEditing true, GetEditRow = 0", _
+        okBegin andalso okEditing andalso okEditRow, _
+        "editing=" & str(okEditing) & " row=" & str(PsListTree_GetEditRow(hC)) )
+    dim as HWND hEditC = GetDlgItem( hSurfC, IDC_FRMMAIN_LISTBOX + 3 )
+    PsTextBox_SetText( hEditC, "renamed_src" )
+    dim as boolean okCommit = PsListTree_EndEdit( hC, true )
+    dim as boolean okCommitText = (PsListTree_GetText(hC,0) = "renamed_src")
+    dim as boolean okNotEditing = (PsListTree_IsEditing(hC) = false)
+    dim as string  sCommit = PsListTree_GetText(hC,0)
+    SelfTest_Check( "commit writes the edited text into the model", _
+        okCommit andalso okCommitText andalso okNotEditing, "text=" & sCommit )
+    ' EndLabelEdit reject: the new text is discarded, the old caption stays.
+    PsListTree_SetEndLabelEditCallback( hC, @SelfTest_RejectEnd )
+    PsListTree_BeginEdit( hC, 0 )
+    dim as HWND hEditC2 = GetDlgItem( hSurfC, IDC_FRMMAIN_LISTBOX + 3 )
+    PsTextBox_SetText( hEditC2, "SHOULD_NOT_STICK" )
+    PsListTree_EndEdit( hC, true )
+    dim as boolean okRejectKept = (PsListTree_GetText(hC,0) = "renamed_src")
+    dim as string  sReject = PsListTree_GetText(hC,0)
+    SelfTest_Check( "EndLabelEdit=FALSE keeps the old text", okRejectKept, "text=" & sReject )
+    PsListTree_SetEndLabelEditCallback( hC, @Tree_EndLabelEdit )
+    ' BeginLabelEdit veto: no edit starts.
+    PsListTree_SetBeginLabelEditCallback( hC, @SelfTest_VetoBegin )
+    dim as boolean okVeto = PsListTree_BeginEdit( hC, 0 )
+    dim as boolean okVetoBlocked = (okVeto = false)
+    dim as boolean okVetoNotEditing = (PsListTree_IsEditing(hC) = false)
+    SelfTest_Check( "BeginLabelEdit=FALSE blocks the edit", _
+        okVetoBlocked andalso okVetoNotEditing, "began=" & str(okVeto) )
+    PsListTree_SetBeginLabelEditCallback( hC, @Tree_BeginLabelEdit )
+    ' Cancel path: begin then EndEdit(false) leaves the model untouched.
+    PsListTree_BeginEdit( hC, 0 )
+    dim as HWND hEditC3 = GetDlgItem( hSurfC, IDC_FRMMAIN_LISTBOX + 3 )
+    PsTextBox_SetText( hEditC3, "cancel_me" )
+    PsListTree_EndEdit( hC, false )
+    dim as boolean okCancelKept = (PsListTree_GetText(hC,0) = "renamed_src")
+    dim as boolean okCancelNotEditing = (PsListTree_IsEditing(hC) = false)
+    dim as string  sCancel = PsListTree_GetText(hC,0)
+    SelfTest_Check( "EndEdit(false) cancels -> model unchanged", _
+        okCancelKept andalso okCancelNotEditing, "text=" & sCancel )
+
+    ' ---- 10g. ENTER commits / ESC cancels THROUGH THE PUMP FILTER. The host pump's
+    '           IsDialogMessage eats Enter (default button) and Esc (cancel) before they reach
+    '           the editor, so PsListTree_FilterMessage must claim them first. Drive that exact
+    '           path with a synthesized WM_KEYDOWN whose hwnd is the editor's RichEdit -- the
+    '           real focus target -- just as GetMessage would hand it to the filter. ----
+    PsListTree_SetText( hC, 0, "src" )                          ' reset the caption
+    ' ENTER: the filter must claim it, commit the edited text, and end the edit.
+    PsListTree_BeginEdit( hC, 0 )
+    dim as HWND hEditE = GetDlgItem( hSurfC, IDC_FRMMAIN_LISTBOX + 3 )
+    PsTextBox_SetText( hEditE, "via_enter" )
+    dim mEnter as MSG
+    mEnter.hwnd    = PsTextBox_GetRichEditHandle( hEditE )     ' the focused RichEdit
+    mEnter.message = WM_KEYDOWN
+    mEnter.wParam  = VK_RETURN
+    dim as boolean okEnterClaimed = PsListTree_FilterMessage( @mEnter )
+    dim as boolean okEnterText    = (PsListTree_GetText(hC,0) = "via_enter")
+    dim as boolean okEnterEnded   = (PsListTree_IsEditing(hC) = false)
+    dim as string  sEnterNow = PsListTree_GetText(hC,0)
+    SelfTest_Check( "FilterMessage claims ENTER -> commits + ends edit", _
+        okEnterClaimed andalso okEnterText andalso okEnterEnded, _
+        "claimed=" & str(okEnterClaimed) & " text=" & sEnterNow )
+    ' ESC: the filter must claim it, cancel (keep 'via_enter'), and end the edit.
+    PsListTree_BeginEdit( hC, 0 )
+    dim as HWND hEditX = GetDlgItem( hSurfC, IDC_FRMMAIN_LISTBOX + 3 )
+    PsTextBox_SetText( hEditX, "should_be_discarded" )
+    dim mEsc as MSG
+    mEsc.hwnd    = PsTextBox_GetRichEditHandle( hEditX )
+    mEsc.message = WM_KEYDOWN
+    mEsc.wParam  = VK_ESCAPE
+    dim as boolean okEscClaimed = PsListTree_FilterMessage( @mEsc )
+    dim as boolean okEscKept    = (PsListTree_GetText(hC,0) = "via_enter")
+    dim as boolean okEscEnded   = (PsListTree_IsEditing(hC) = false)
+    dim as string  sEscNow = PsListTree_GetText(hC,0)
+    SelfTest_Check( "FilterMessage claims ESC -> cancels (text kept) + ends edit", _
+        okEscClaimed andalso okEscKept andalso okEscEnded, _
+        "claimed=" & str(okEscClaimed) & " text=" & sEscNow )
 
     print "=== self-test complete: " & str(gFailCount) & " failure(s) ==="
 end sub
 
 
 ' ========================================================================================
-' PsListBox_MessageCallback
+' PsListTree_MessageCallback
 ' ========================================================================================
-function PsListBox_MessageCallback( byval m as PSLISTBOX_MESSAGEINFO ptr ) as boolean
+function PsListTree_MessageCallback( byval m as PSLISTTREE_MESSAGEINFO ptr ) as boolean
 
     select case m->uMsg
              
@@ -884,9 +1152,9 @@ function PsListBox_MessageCallback( byval m as PSLISTBOX_MESSAGEINFO ptr ) as bo
             dim as HWND hCtl = GetParent(m->hList)
             ' plain string, not DWSTRING: print interleaves wide chars
             dim as string sKind = "item"
-            if PsListBox_IsHeader( hCtl, m->idx ) then sKind = "HEADER"
+            if PsListTree_IsHeader( hCtl, m->idx ) then sKind = "HEADER"
             print "click row" & str(m->idx) & " (" & sKind & ")  focus=" & _
-                  str(PsListBox_GetCurSel(hCtl)) & "  selCount=" & str(PsListBox_GetSelCount(hCtl))
+                  str(PsListTree_GetCurSel(hCtl)) & "  selCount=" & str(PsListTree_GetSelCount(hCtl))
             ' Header collapse/expand is handled inside the control on the mouse-down,
             ' and it preserves the current selection. Return FALSE: the listbox needs
             ' its default WM_LBUTTONUP handling to release the mouse capture it took
@@ -904,11 +1172,11 @@ end function
 ' Drag-and-drop callbacks (demo). DragDrop reports every user move; CanDrop shows a veto
 ' using the drop-target ROWINFO -- here it forbids dropping onto the "Folders" header.
 ' ========================================================================================
-sub PsListBox_DragDropCallback( byval hList as HWND, byval newFirstRow as integer, byval count as integer )
+sub PsListTree_DragDropCallback( byval hList as HWND, byval newFirstRow as integer, byval count as integer )
     print "DragDrop: moved " & str(count) & " row(s); block now starts at model row " & str(newFirstRow)
 end sub
 
-function PsListBox_CanDropCallback( byval p as PSLISTBOX_DROPINFO ptr ) as boolean
+function PsListTree_CanDropCallback( byval p as PSLISTTREE_DROPINFO ptr ) as boolean
     if (p->onHeader = true) andalso (p->targetInfo <> 0) then
         dim as string sTarget = p->targetInfo->Text     ' plain string: print interleaves DWSTRING nulls
         if sTarget = "Folders" then
@@ -921,13 +1189,13 @@ end function
 
 
 ' ========================================================================================
-' PsListBox_TooltipCallback  -- per-row tooltip text, resolved on demand
+' PsListTree_TooltipCallback  -- per-row tooltip text, resolved on demand
 ' ========================================================================================
-function PsListBox_TooltipCallback( byval hCtl as HWND, byval row as integer ) as DWSTRING
-    if PsListBox_IsHeader( hCtl, row ) then
-        return "Group header: " & PsListBox_GetText( hCtl, row )
+function PsListTree_TooltipCallback( byval hCtl as HWND, byval row as integer ) as DWSTRING
+    if PsListTree_IsHeader( hCtl, row ) then
+        return "Group header: " & PsListTree_GetText( hCtl, row )
     end if
-    return "Row " & row & " -> " & PsListBox_GetText( hCtl, row )
+    return "Row " & row & " -> " & PsListTree_GetText( hCtl, row )
 end function
 
 
@@ -950,118 +1218,176 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
 
     HWND_FRMMAIN = pWindow->Create( _
             null, APPNAME, @frmMain_WndProc, _
-            100, 100, 800, 400 _
+            100, 100, 900, 640 _
             )
 
     dim as RECT rc: GetClientRect( HWND_FRMMAIN, @rc )
     dim as long halfW = rc.right \ 2
+    ' Reserve a full-width band at the bottom for instance C (the tree + editing showcase);
+    ' A and B share the region above it.
+    dim as long topH = rc.bottom - pWindow->ScaleY(230)
+    if topH < 200 then topH = 200
 
     ' ---- Instance A (left half): many rows -- exercises scrolling ----
-    HWND_FRMEXPLORER = PsListBox_Create( HWND_FRMMAIN, IDC_FRMMAIN_LISTBOX )
+    HWND_FRMEXPLORER = PsListTree_Create( HWND_FRMMAIN, IDC_FRMMAIN_LISTBOX )
     SetWindowPos( HWND_FRMEXPLORER, 0, _
-        rc.left, rc.top, halfW, rc.bottom, _
+        rc.left, rc.top, halfW, topH, _
         SWP_NOZORDER or SWP_SHOWWINDOW )
-    PsListBox_SetPaintCallback( HWND_FRMEXPLORER, @PsListBox_PaintCallback )
-    PsListBox_SetMessageCallback( HWND_FRMEXPLORER, @PsListBox_MessageCallback )
-    PsListBox_SetBackColor( HWND_FRMEXPLORER, theme.BackColor )
-    PsListBox_SetFont( HWND_FRMEXPLORER, ghFont(GUIFONT_10) )
-    PsListBox_SetTooltipCallback( HWND_FRMEXPLORER, @PsListBox_TooltipCallback )
-    PsListBox_SetExtendedSelect( HWND_FRMEXPLORER, true )   ' Shift/Ctrl range selection
+    PsListTree_SetPaintCallback( HWND_FRMEXPLORER, @PsListTree_PaintCallback )
+    PsListTree_SetMessageCallback( HWND_FRMEXPLORER, @PsListTree_MessageCallback )
+    PsListTree_SetBackColor( HWND_FRMEXPLORER, theme.BackColor )
+    PsListTree_SetFont( HWND_FRMEXPLORER, ghFont(GUIFONT_10) )
+    PsListTree_SetTooltipCallback( HWND_FRMEXPLORER, @PsListTree_TooltipCallback )
+    PsListTree_SetExtendedSelect( HWND_FRMEXPLORER, true )   ' Shift/Ctrl range selection
     ' Drag-reorder: instance A drags single rows and whole multi-selections (no CanDrop veto).
-    PsListBox_SetDragReorder( HWND_FRMEXPLORER, true )
-    PsListBox_SetDragDropCallback( HWND_FRMEXPLORER, @PsListBox_DragDropCallback )
+    PsListTree_SetDragReorder( HWND_FRMEXPLORER, true )
+    PsListTree_SetDragDropCallback( HWND_FRMEXPLORER, @PsListTree_DragDropCallback )
     ' The scrollbar is created/positioned/auto-hidden by the control; we only theme it.
-    ' (PsListBox_SetScrollBarPaintCallback is available for full custom drawing.)
-    PsListBox_SetScrollBarColors( HWND_FRMEXPLORER, theme.BackColorScrollBar, _
+    ' (PsListTree_SetScrollBarPaintCallback is available for full custom drawing.)
+    PsListTree_SetScrollBarColors( HWND_FRMEXPLORER, theme.BackColorScrollBar, _
                                  theme.ForeColorScrollBar, theme.ForeColorScrollBarHot )
     ' Two groups; bulk add is batched so the map rebuilds once, not per row.
-    PsListBox_BeginUpdate( HWND_FRMEXPLORER )
+    PsListTree_BeginUpdate( HWND_FRMEXPLORER )
     ' Two leading items for the non-selectable-row edge cases (A is extended-select, so it
     ' also drives the Shift-range test). Row 0 is non-selectable and is the VERY FIRST row:
     ' pressing Up from row 1 has nowhere selectable to land, so the caret stays on row 1.
-    PsListBox_AddString( HWND_FRMEXPLORER, "(non-selectable first row - Up from below stays put)", 999 )  ' row 0
-    PsListBox_AddString( HWND_FRMEXPLORER, "second row (selectable - press Up here)", 998 )               ' row 1
-    PsListBox_AddHeader( HWND_FRMEXPLORER, "Group Alpha" )                                                ' row 2
+    PsListTree_AddString( HWND_FRMEXPLORER, "(non-selectable first row - Up from below stays put)", 999 )  ' row 0
+    PsListTree_AddString( HWND_FRMEXPLORER, "second row (selectable - press Up here)", 998 )               ' row 1
+    PsListTree_AddHeader( HWND_FRMEXPLORER, "Group Alpha" )                                                ' row 2
     for i as integer = 0 to 20
-        PsListBox_AddString( HWND_FRMEXPLORER, "Alpha item " & i, 1000 + i )                              ' rows 3..23
+        PsListTree_AddString( HWND_FRMEXPLORER, "Alpha item " & i, 1000 + i )                              ' rows 3..23
     next
-    PsListBox_AddHeader( HWND_FRMEXPLORER, "Group Beta" )
+    PsListTree_AddHeader( HWND_FRMEXPLORER, "Group Beta" )
     for i as integer = 0 to 20
-        PsListBox_AddString( HWND_FRMEXPLORER, "Beta item " & i, 2000 + i )
+        PsListTree_AddString( HWND_FRMEXPLORER, "Beta item " & i, 2000 + i )
     next
-    PsListBox_EndUpdate( HWND_FRMEXPLORER )
-    PsListBox_SetRowSelectable( HWND_FRMEXPLORER, 0, false )    ' the non-selectable first row
-    PsListBox_SetRowSelectable( HWND_FRMEXPLORER, 8, false )    ' "Alpha item 5" -- for the Shift-range test
-    PsListBox_SetCurSel( HWND_FRMEXPLORER, 1 )                  ' start on the second row
+    PsListTree_EndUpdate( HWND_FRMEXPLORER )
+    PsListTree_SetRowSelectable( HWND_FRMEXPLORER, 0, false )    ' the non-selectable first row
+    PsListTree_SetRowSelectable( HWND_FRMEXPLORER, 8, false )    ' "Alpha item 5" -- for the Shift-range test
+    PsListTree_SetCurSel( HWND_FRMEXPLORER, 1 )                  ' start on the second row
 
     ' ---- Instance B (right half): a couple of small groups, one starting
     ' collapsed, PLUS the embedded column header band. Tests: per-instance hover
     ' (must not affect A), empty client-area painting below the last row, collapse
     ' hiding a group's items, and the header/columns integration. ----
-    HWND_FRMEXPLORER2 = PsListBox_Create( HWND_FRMMAIN, IDC_FRMMAIN_LISTBOX )
+    HWND_FRMEXPLORER2 = PsListTree_Create( HWND_FRMMAIN, IDC_FRMMAIN_LISTBOX )
     SetWindowPos( HWND_FRMEXPLORER2, 0, _
-        halfW, rc.top, rc.right - halfW, rc.bottom, _
+        halfW, rc.top, rc.right - halfW, topH, _
         SWP_NOZORDER or SWP_SHOWWINDOW )
-    PsListBox_SetPaintCallback( HWND_FRMEXPLORER2, @PsListBox_PaintCallback )
-    PsListBox_SetMessageCallback( HWND_FRMEXPLORER2, @PsListBox_MessageCallback )
-    PsListBox_SetBackColor( HWND_FRMEXPLORER2, theme.BackColor )
-    PsListBox_SetFont( HWND_FRMEXPLORER2, ghFont(GUIFONT_10) )
-    PsListBox_SetTooltipCallback( HWND_FRMEXPLORER2, @PsListBox_TooltipCallback )
-    PsListBox_SetScrollBarColors( HWND_FRMEXPLORER2, theme.BackColorScrollBar, _
+    PsListTree_SetPaintCallback( HWND_FRMEXPLORER2, @PsListTree_PaintCallback )
+    PsListTree_SetMessageCallback( HWND_FRMEXPLORER2, @PsListTree_MessageCallback )
+    PsListTree_SetBackColor( HWND_FRMEXPLORER2, theme.BackColor )
+    PsListTree_SetFont( HWND_FRMEXPLORER2, ghFont(GUIFONT_10) )
+    PsListTree_SetTooltipCallback( HWND_FRMEXPLORER2, @PsListTree_TooltipCallback )
+    PsListTree_SetScrollBarColors( HWND_FRMEXPLORER2, theme.BackColorScrollBar, _
                                  theme.ForeColorScrollBar, theme.ForeColorScrollBarHot )
     ' B uses the OTHER selection mode, so the harness covers both.
-    PsListBox_SetMultiSelect( HWND_FRMEXPLORER2, true )     ' checklist style: click toggles
+    PsListTree_SetMultiSelect( HWND_FRMEXPLORER2, true )     ' checklist style: click toggles
     ' Drag-reorder on B too: it has headers (drop-on-header) and a CanDrop veto guarding "Folders".
-    PsListBox_SetDragReorder( HWND_FRMEXPLORER2, true )
-    PsListBox_SetDragDropCallback( HWND_FRMEXPLORER2, @PsListBox_DragDropCallback )
-    PsListBox_SetCanDropCallback( HWND_FRMEXPLORER2, @PsListBox_CanDropCallback )
-    PsListBox_BeginUpdate( HWND_FRMEXPLORER2 )
-    PsListBox_AddHeader( HWND_FRMEXPLORER2, "Files" )              ' model row 0
+    PsListTree_SetDragReorder( HWND_FRMEXPLORER2, true )
+    PsListTree_SetDragDropCallback( HWND_FRMEXPLORER2, @PsListTree_DragDropCallback )
+    PsListTree_SetCanDropCallback( HWND_FRMEXPLORER2, @PsListTree_CanDropCallback )
+    PsListTree_BeginUpdate( HWND_FRMEXPLORER2 )
+    PsListTree_AddHeader( HWND_FRMEXPLORER2, "Files" )              ' model row 0
     for i as integer = 0 to 40
-        dim as integer r = PsListBox_AddString( HWND_FRMEXPLORER2, "file" & i & ".bas", i )
+        dim as integer r = PsListTree_AddString( HWND_FRMEXPLORER2, "file" & i & ".bas", i )
         ' Columns 1/2 (Size/Type); column 0 is the AddString text itself.
-        PsListBox_SetCellText( HWND_FRMEXPLORER2, r, 1, str( (i + 1) * 137 ) )
-        PsListBox_SetCellText( HWND_FRMEXPLORER2, r, 2, "FreeBASIC source" )
+        PsListTree_SetCellText( HWND_FRMEXPLORER2, r, 1, str( (i + 1) * 137 ) )
+        PsListTree_SetCellText( HWND_FRMEXPLORER2, r, 2, "FreeBASIC source" )
     next
-    PsListBox_AddHeader( HWND_FRMEXPLORER2, "Folders" )           ' model row 42
+    PsListTree_AddHeader( HWND_FRMEXPLORER2, "Folders" )           ' model row 42
     for i as integer = 0 to 4
-        dim as integer r = PsListBox_AddString( HWND_FRMEXPLORER2, "folder" & i, i )
+        dim as integer r = PsListTree_AddString( HWND_FRMEXPLORER2, "folder" & i, i )
         ' Size stays "" (sparse cells) -- proves never-set cells paint as empty.
-        PsListBox_SetCellText( HWND_FRMEXPLORER2, r, 2, "Folder" )
+        PsListTree_SetCellText( HWND_FRMEXPLORER2, r, 2, "Folder" )
     next
-    PsListBox_EndUpdate( HWND_FRMEXPLORER2 )
+    PsListTree_EndUpdate( HWND_FRMEXPLORER2 )
     ' Start the "Folders" group collapsed. (Was CollapseRow(6) -- comment rot from when
     ' the file loop added 5 rows; row 6 is a file item now, so that call was a silent
     ' no-op and the group never started collapsed.)
-    PsListBox_CollapseRow( HWND_FRMEXPLORER2, 42 )
+    PsListTree_CollapseRow( HWND_FRMEXPLORER2, 42 )
 
     ' ---- Spanned-row demo: an ordinary selectable item (model row 3) painted as ONE
     ' cell across the whole column band instead of one cell per column. Its text stays in
     ' column 0; the paint callback gets columnCount = 1 and p->isSpanned = true. Selecting,
     ' hover and keyboard navigation still work on it like any other row. ----
-    PsListBox_SetText( HWND_FRMEXPLORER2, 3, "-- spanned row: this item merges all columns --" )
-    PsListBox_SetRowSpanColumns( HWND_FRMEXPLORER2, 3, true )
+    PsListTree_SetText( HWND_FRMEXPLORER2, 3, "-- spanned row: this item merges all columns --" )
+    PsListTree_SetRowSpanColumns( HWND_FRMEXPLORER2, 3, true )
 
     ' ---- Non-selectable-row demo: model row 20 cannot be selected or focused; the mouse
     ' and keyboard both skip it, and the paint callback greys it. ----
-    PsListBox_SetCellText( HWND_FRMEXPLORER2, 20, 1, "--" )
-    PsListBox_SetText( HWND_FRMEXPLORER2, 20, "file19.bas  (non-selectable)" )
-    PsListBox_SetRowSelectable( HWND_FRMEXPLORER2, 20, false )
+    PsListTree_SetCellText( HWND_FRMEXPLORER2, 20, 1, "--" )
+    PsListTree_SetText( HWND_FRMEXPLORER2, 20, "file19.bas  (non-selectable)" )
+    PsListTree_SetRowSelectable( HWND_FRMEXPLORER2, 20, false )
 
     ' ---- Embedded column header on instance B (phase 3). Columns are defined through
-    ' the PsListBox wrappers; the header child is the store. Host callbacks go through
+    ' the PsListTree wrappers; the header child is the store. Host callbacks go through
     ' the wrappers too -- the resize slot on the child itself belongs to the control. ----
-    PsListBox_AddColumn( HWND_FRMEXPLORER2, "Name", 160 )
-    PsListBox_AddColumn( HWND_FRMEXPLORER2, "Size", 70 )
-    PsListBox_AddColumn( HWND_FRMEXPLORER2, "Type" )    ' fill column (default: last)
-    PsListBox_SetHeaderPaintCallback( HWND_FRMEXPLORER2, @Header_PaintCallback )
-    PsListBox_SetHeaderBackColor( HWND_FRMEXPLORER2, theme.BackColorScrollBar )
-    PsListBox_SetHeaderFont( HWND_FRMEXPLORER2, ghFont(GUIFONTBOLD_10) )
-    PsListBox_SetColumnResizeCallback( HWND_FRMEXPLORER2, @Header_WidthChangedCallback )
-    PsListBox_SetColumnClickCallback( HWND_FRMEXPLORER2, @Header_ClickCallback )
-    PsListBox_SetColumnAutoSizeCallback( HWND_FRMEXPLORER2, @Header_AutoSizeCallback )
-    PsListBox_ShowHeader( HWND_FRMEXPLORER2, true )
-    HWND_COLHDR = PsListBox_GetHeader( HWND_FRMEXPLORER2 )
+    PsListTree_AddColumn( HWND_FRMEXPLORER2, "Name", 160 )
+    PsListTree_AddColumn( HWND_FRMEXPLORER2, "Size", 70 )
+    PsListTree_AddColumn( HWND_FRMEXPLORER2, "Type" )    ' fill column (default: last)
+    PsListTree_SetHeaderPaintCallback( HWND_FRMEXPLORER2, @Header_PaintCallback )
+    PsListTree_SetHeaderBackColor( HWND_FRMEXPLORER2, theme.BackColorScrollBar )
+    PsListTree_SetHeaderFont( HWND_FRMEXPLORER2, ghFont(GUIFONTBOLD_10) )
+    PsListTree_SetColumnResizeCallback( HWND_FRMEXPLORER2, @Header_WidthChangedCallback )
+    PsListTree_SetColumnClickCallback( HWND_FRMEXPLORER2, @Header_ClickCallback )
+    PsListTree_SetColumnAutoSizeCallback( HWND_FRMEXPLORER2, @Header_AutoSizeCallback )
+    PsListTree_ShowHeader( HWND_FRMEXPLORER2, true )
+    HWND_COLHDR = PsListTree_GetHeader( HWND_FRMEXPLORER2 )
+
+    ' Instance A: enable in-place label editing (F2 on the focused row). Structure and look
+    ' are unchanged -- this only adds the F2 rename gesture (and the pump obligation below).
+    PsListTree_EnableLabelEdit( HWND_FRMEXPLORER, true )
+    PsListTree_SetBeginLabelEditCallback( HWND_FRMEXPLORER, @Tree_BeginLabelEdit )
+    PsListTree_SetEndLabelEditCallback( HWND_FRMEXPLORER, @Tree_EndLabelEdit )
+
+    ' ---- Instance C (full-width bottom band): the TREE + IN-PLACE EDITING showcase.
+    ' A real multi-level tree built with AddNode: control-drawn chevron twisties, per-depth
+    ' indent, unlimited nesting, and label editing (F2, or a click on the already-current
+    ' row). Nothing here is a header -- every parent is a plain AddNode node with a twisty. ----
+    HWND_FRMEXPLORER3 = PsListTree_Create( HWND_FRMMAIN, IDC_FRMMAIN_LISTBOX )
+    SetWindowPos( HWND_FRMEXPLORER3, 0, _
+        rc.left, topH, rc.right, rc.bottom - topH, _
+        SWP_NOZORDER or SWP_SHOWWINDOW )
+    PsListTree_SetPaintCallback( HWND_FRMEXPLORER3, @PsListTree_PaintCallback )
+    PsListTree_SetMessageCallback( HWND_FRMEXPLORER3, @PsListTree_MessageCallback )
+    PsListTree_SetBackColor( HWND_FRMEXPLORER3, theme.BackColor )
+    PsListTree_SetFont( HWND_FRMEXPLORER3, ghFont(GUIFONT_10) )
+    PsListTree_SetTooltipCallback( HWND_FRMEXPLORER3, @PsListTree_TooltipCallback )
+    PsListTree_SetScrollBarColors( HWND_FRMEXPLORER3, theme.BackColorScrollBar, _
+                                 theme.ForeColorScrollBar, theme.ForeColorScrollBarHot )
+    PsListTree_SetExtendedSelect( HWND_FRMEXPLORER3, true )
+    ' Tree visuals: per-depth indent + control-drawn chevrons in the icon font.
+    PsListTree_SetTreeIndent( HWND_FRMEXPLORER3, true )
+    PsListTree_ShowTwisty( HWND_FRMEXPLORER3, true )
+    PsListTree_SetTwistyFont( HWND_FRMEXPLORER3, ghFont(SYMBOLFONT_9) )
+    PsListTree_SetTwistyColor( HWND_FRMEXPLORER3, theme.ForeColor )
+    ' In-place editing: F2 on the focused row, or a click on the row that is already current.
+    PsListTree_EnableLabelEdit( HWND_FRMEXPLORER3, true )
+    PsListTree_SetClickToEdit( HWND_FRMEXPLORER3, true )
+    PsListTree_SetBeginLabelEditCallback( HWND_FRMEXPLORER3, @Tree_BeginLabelEdit )
+    PsListTree_SetEndLabelEditCallback( HWND_FRMEXPLORER3, @Tree_EndLabelEdit )
+    PsListTree_SetExpandCollapseCallback( HWND_FRMEXPLORER3, @Tree_ExpandCollapse )
+    ' Build a 4-level tree. parent = -1 makes a new root; each AddNode appends under its parent.
+    PsListTree_BeginUpdate( HWND_FRMEXPLORER3 )
+    dim as integer rSrc = PsListTree_AddNode( HWND_FRMEXPLORER3, -1, "src", 0 )                    ' L0
+        dim as integer rAfx = PsListTree_AddNode( HWND_FRMEXPLORER3, rSrc, "AfxNova", 0 )          ' L1
+            PsListTree_AddNode( HWND_FRMEXPLORER3, rAfx, "CWindow.inc", 0 )                        ' L2 leaf
+            dim as integer rCtl = PsListTree_AddNode( HWND_FRMEXPLORER3, rAfx, "controls", 0 )     ' L2
+                PsListTree_AddNode( HWND_FRMEXPLORER3, rCtl, "PsListTree.inc", 0 )                  ' L3 leaf
+                PsListTree_AddNode( HWND_FRMEXPLORER3, rCtl, "PsTextBox.inc", 0 )                  ' L3 leaf
+            PsListTree_AddNode( HWND_FRMEXPLORER3, rAfx, "AfxStr.inc", 0 )                         ' L2 leaf
+        dim as integer rDemo = PsListTree_AddNode( HWND_FRMEXPLORER3, rSrc, "demo", 0 )            ' L1
+            PsListTree_AddNode( HWND_FRMEXPLORER3, rDemo, "main.bas", 0 )                          ' L2 leaf
+            PsListTree_AddNode( HWND_FRMEXPLORER3, rDemo, "frmMain.inc", 0 )                       ' L2 leaf
+    dim as integer rDocs = PsListTree_AddNode( HWND_FRMEXPLORER3, -1, "docs", 0 )                  ' L0
+        PsListTree_AddNode( HWND_FRMEXPLORER3, rDocs, "README.md", 0 )                             ' L1 leaf
+        PsListTree_AddNode( HWND_FRMEXPLORER3, rDocs, "REFACTOR_PLAN.md", 0 )                      ' L1 leaf
+    PsListTree_AddNode( HWND_FRMEXPLORER3, -1, "LICENSE  (leaf root - no twisty)", 0 )             ' L0 leaf
+    ' Start "controls" collapsed so a collapsed twisty at depth 2 is visible from the outset.
+    PsListTree_SetNodeCollapsed( HWND_FRMEXPLORER3, rCtl, true )
+    PsListTree_EndUpdate( HWND_FRMEXPLORER3 )
+    PsListTree_SetCurSel( HWND_FRMEXPLORER3, 0 )
 
     ' ---- Geometry gates (numeric, asserted, never eyeballed) ----
     ' 1) Column rects: contiguous from 0, fill column's right edge = header client width.
@@ -1106,10 +1432,10 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
                                "/" & str(contW) & " hdrH=" & str(hdrHgt) & " listTop=" & str(listTop)
         print sTrace
         dim as boolean okShown = (hdrTop = 0) andalso (hdrWide = contW) andalso (listTop = hdrHgt)
-        PsListBox_ShowHeader( HWND_FRMEXPLORER2, false )
+        PsListTree_ShowHeader( HWND_FRMEXPLORER2, false )
         GetWindowRect( hList2, @rcList )
         dim as integer listTopHidden = rcList.top - rcCont.top
-        PsListBox_ShowHeader( HWND_FRMEXPLORER2, true )
+        PsListTree_ShowHeader( HWND_FRMEXPLORER2, true )
         dim as boolean okHidden = (listTopHidden = 0)
         dim as string sVerdict = "Embed layout: "
         if okShown andalso okHidden then sVerdict &= "PASS" else sVerdict &= "FAIL"
@@ -1117,12 +1443,12 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
         print sVerdict
     end scope
 
-    print "PsListBox / PsVScrollBar test harness"
+    print "PsListTree / PsVScrollBar test harness"
     print "-----------------------------------"
-    print "Instance A (left) : "; PsListBox_GetCount( HWND_FRMEXPLORER ); " model rows, "; _
-          PsListBox_GetVisibleCount( HWND_FRMEXPLORER ); " visible   [extended select: Shift/Ctrl]"
-    print "Instance B (right): "; PsListBox_GetCount( HWND_FRMEXPLORER2 ); " model rows, "; _
-          PsListBox_GetVisibleCount( HWND_FRMEXPLORER2 ); " visible   [multi select: click toggles]"
+    print "Instance A (left) : "; PsListTree_GetCount( HWND_FRMEXPLORER ); " model rows, "; _
+          PsListTree_GetVisibleCount( HWND_FRMEXPLORER ); " visible   [extended select: Shift/Ctrl]"
+    print "Instance B (right): "; PsListTree_GetCount( HWND_FRMEXPLORER2 ); " model rows, "; _
+          PsListTree_GetVisibleCount( HWND_FRMEXPLORER2 ); " visible   [multi select: click toggles]"
     print
     print "Manual checks (things a script cannot drive):"
     print "  Selection  A: click / Ctrl+click toggles / Shift+click ranges"
@@ -1143,7 +1469,7 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
     print "             dbl-click a divider autosizes to the caption; click a column"
     print "             body SORTS instance B (arrow glyph, toggles asc/desc; press,"
     print "             slide off, release -> nothing); tooltip shows column text"
-    print "  Self-test  PSLISTBOX_SELFTEST=1 main.exe -> geometry asserts, then exits"
+    print "  Self-test  PSLISTTREE_SELFTEST=1 main.exe -> geometry asserts, then exits"
     print
 
     
@@ -1152,7 +1478,7 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
 
     ' Headless geometry/contract assertions, then exit (PsHScrollBar's env-gate shape):
     ' a normal launch never runs this.
-    if environ("PSLISTBOX_SELFTEST") = "1" then
+    if environ("PSLISTTREE_SELFTEST") = "1" then
         frmMain_RunSelfTest()
         DestroyWindow( HWND_FRMMAIN )
     end if
@@ -1163,6 +1489,11 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
     ' Message loop
     do while GetMessage(@uMsg, null, 0, 0)
         if uMsg.message = WM_QUIT then exit do
+
+        ' PsListTree label-editing pump obligation: forwards to the active editor's PsTextBox
+        ' so its right-click context menu gets keyboard nav / outside-click dismissal. Required
+        ' because instances A and C enable label editing; a no-op when nothing is editing.
+        if PsListTree_FilterMessage( @uMsg ) then continue do
 
         ' Processes accelerator keys for menu commands
         if (pWindow->AccelHandle = 0) orelse (TranslateAccelerator(pWindow->hWindow, pWindow->AccelHandle, @uMsg) = 0) then

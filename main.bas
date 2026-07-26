@@ -35,6 +35,7 @@ dim shared ghFont(MAXFONTS) as HFONT
 dim shared as HWND HWND_FRMMAIN
 dim shared as HWND HWND_FRMEXPLORER
 dim shared as HWND HWND_FRMEXPLORER2
+dim shared as HWND HWND_FRMEXPLORER3      ' tree + in-place-editing showcase
 dim shared as HWND HWND_COLHDR
 
 
@@ -58,7 +59,12 @@ dim shared theme as THEME_TYPE
 #include once "PsBufferPaint.inc"
 #include once "PsVScrollBar.inc"
 #include once "PsColumnHeader.inc"
-#include once "PsListBox.inc"
+' PsListTree's in-place label editor is a PsTextBox child; PsTextBox in turn uses PsPopupMenu
+' for its right-click menu. Both implementations must be compiled before PsListTree.inc, which
+' calls into them -- same assembly-order rule the scrollbar/header above follow.
+#include once "PsPopupMenu.inc"
+#include once "PsTextBox.inc"
+#include once "PsListTree.inc"
 #include once "frmMain.inc"
 
 
