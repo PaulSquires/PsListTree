@@ -1,14 +1,25 @@
-# PsListBox
+# PsListTree
 
-An owner-drawn list box for FreeBASIC Win32 applications: a scrolling list of fixed-height
-rows that you paint yourself, with collapsible group headers, single / multiple / extended
-selection, per-row tooltips, and an optional multi-column report mode driven by a resizable
-header band.
+An owner-drawn list **and tree** control for FreeBASIC Win32 applications: a scrolling list of
+fixed-height rows that you paint yourself, with unlimited-depth **tree nodes**, control-drawn
+expand/collapse twisties, **in-place label editing**, collapsible group headers, single /
+multiple / extended selection, per-row tooltips, and an optional multi-column report mode driven
+by a resizable header band.
 
-It is the control you reach for when a system `LISTBOX` almost fits but its appearance does
-not — a file explorer pane, a results list, a symbol browser, an autocomplete popup. There is
-no system control underneath: the whole surface is drawn in one pass through a double buffer,
-so nothing about the look depends on the visual style the user happens to be running.
+The name says it: **PsListTree is a list box and a tree view in one control.** As a tree it does
+what the traditional Win32 tree view (`SysTreeView32`) does — parent/child hierarchy of any
+depth, `+`/`−` twisties, per-level indentation, Left/Right collapse and expand, and F2
+rename-in-place with begin/end callbacks that mirror `TVN_BEGINLABELEDIT` / `TVN_ENDLABELEDIT`.
+The differences are deliberate: it is **fully owner-drawn** (no visual-style dependency and every
+row pixel is yours), nodes are addressed by plain **model index** rather than opaque `HTREEITEM`
+handles, and a flat list, a grouped list and a deep tree are all the **same control** — a classic
+header/item group is simply the depth-1 case. See *Tree view and in-place editing* below.
+
+It is the control you reach for when a system `LISTBOX` or `SysTreeView32` almost fits but its
+appearance does not — a file explorer pane, a results list, a symbol browser, an autocomplete
+popup, a settings tree. There is no system control underneath: the whole surface is drawn in one
+pass through a double buffer, so nothing about the look depends on the visual style the user
+happens to be running.
 
 The control owns three child windows for you — the row surface, an owner-drawn vertical
 scrollbar that appears only while the rows overflow, and a column header band that starts
@@ -23,9 +34,17 @@ rows but never renumbers anything.
 
 ## What it looks like
 
-![The PsListBox demo](PsListBox.png)
+**As a tree** — `tree_demo.exe`:
 
-Two instances. On the left a grouped single-column list — a collapsible group header, one selected row, and rows that keep their selection across a collapse. On the right the same control in report mode: a `PsColumnHeader` band (Name / Size / Type), a group row, and an embedded `PsVScrollBar` down the right edge. Public indices in both are **model** indices; the visible index space never leaks out.
+![The PsListTree tree demo](tree_demo.png)
+
+A multi-level tree built with `PsListTree_AddNode`: per-depth indentation, control-drawn chevron twisties (`˅` on expanded parents, `›` on the collapsed *math* node), leaf nodes with no twisty, the selected root with its focus bar, and F2 / click-to-rename editing. This is exactly the behaviour of a traditional tree view, drawn entirely by the control.
+
+**As a list and a report** — `main.exe`:
+
+![The PsListTree list/report demo](PsListTree.png)
+
+The same control in its list modes. On the left a grouped single-column list — a collapsible group header, one selected row, and rows that keep their selection across a collapse. On the right, report mode: a `PsColumnHeader` band (Name / Size / Type), a group row, and an embedded `PsVScrollBar` down the right edge. Public indices in both are **model** indices; the visible index space never leaks out.
 
 ---
 
@@ -35,14 +54,25 @@ Two instances. On the left a grouped single-column list — a collapsible group 
 
 | File | Purpose |
 |---|---|
-| `PsListBox.bi` | Declarations — types, callbacks, constants, function prototypes |
-| `PsListBox.inc` | Implementation |
+| `PsListTree.bi` | Declarations — types, callbacks, constants, function prototypes |
+| `PsListTree.inc` | Implementation |
 | `PsColumnHeader.bi` / `.inc` | The column header band the control embeds — see [PsColumnHeader.md](PsColumnHeader.md) |
 | `PsVScrollBar.bi` / `.inc` | The vertical scrollbar the control embeds |
 | `PsBufferPaint.bi` / `.inc` | The flicker-free drawing surface everything paints through |
 
 All six files are required even if you never define a column and never touch the scrollbar:
 the control creates both children unconditionally.
+
+**Only if you enable in-place label editing** (`PsListTree_EnableLabelEdit`), copy four more —
+the editor is a `PsTextBox`, which uses `PsPopupMenu` for its right-click menu:
+
+| File | Purpose |
+|---|---|
+| `PsTextBox.bi` / `.inc` | The single-line editor created over a row during a rename |
+| `PsPopupMenu.bi` / `.inc` | The editor's context menu |
+
+Include their implementations **before** `PsListTree.inc` (it calls into them), and add the pump
+call under *In-place label editing*. A control that never enables editing needs none of this.
 
 **AfxNova is required.** The control is built on `CWindow`, and `PsBufferPaint` draws through
 `AfxNova\CGdiPlus.inc`. Sources include AfxNova relative to the workspace root
@@ -53,7 +83,7 @@ path:
 fbc64.exe -i "C:\dev" main.bas
 ```
 
-**Include order — this one bites.** `PsListBox.bi` includes only `PsBufferPaint.bi`. It does
+**Include order — this one bites.** `PsListTree.bi` includes only `PsBufferPaint.bi`. It does
 **not** include `PsVScrollBar.bi` or `PsColumnHeader.bi`, yet it names types from both:
 `CVSCROLL_DEFAULT_WIDTH` and `VScrollPaintCallbackSub` from the scrollbar, and
 `HDR_WidthChangedCallbackSub`, `HDR_ClickCallbackSub`, `HDR_AutoSizeCallbackFunc`,
@@ -65,10 +95,21 @@ files in exactly this order:
 #include once "PsBufferPaint.inc"
 #include once "PsVScrollBar.inc"
 #include once "PsColumnHeader.inc"
-#include once "PsListBox.inc"
+#include once "PsListTree.inc"
 ```
 
-Get the order wrong and the errors point at `PsListBox.bi`, naming types rather than the
+If you enable label editing, add the editor's two implementations **before** `PsListTree.inc`:
+
+```freebasic
+#include once "PsBufferPaint.inc"
+#include once "PsVScrollBar.inc"
+#include once "PsColumnHeader.inc"
+#include once "PsPopupMenu.inc"      ' editing only
+#include once "PsTextBox.inc"        ' editing only
+#include once "PsListTree.inc"
+```
+
+Get the order wrong and the errors point at `PsListTree.bi`, naming types rather than the
 missing include.
 
 The AfxNova headers come first, before any of the above:
@@ -98,9 +139,10 @@ tears down a `PsBufferPaint`.
 function called `ok` becomes a duplicate definition the moment you adopt these files. Use
 `bOK` instead.
 
-**There is no message-pump filter.** Neither this control nor the header nor the scrollbar
-installs one; there is no `PsListBox_FilterMessage` to call. The only pump requirement is the
-ordinary dialog-manager one below.
+**The message-pump filter is needed only for label editing.** If — and only if — you call
+`PsListTree_EnableLabelEdit`, you must call `PsListTree_FilterMessage( @msg )` in your loop,
+**ahead of `IsDialogMessage`** (see *Tree view and in-place editing*). Without editing there is
+nothing to call, and the only pump requirement is the ordinary dialog-manager one below.
 
 **For Tab navigation, call `IsDialogMessage` in your message pump.** The row surface is a
 tabstop, and the container declares itself a control parent, so the dialog manager will step
@@ -133,42 +175,42 @@ gives it focus, so this only affects a keyboard-first start.
 
 ```freebasic
 ' Create it. The control is created zero-sized and hidden; place it yourself.
-dim as HWND hList = PsListBox_Create( hWndParent, IDC_MYFORM_LIST )
+dim as HWND hList = PsListTree_Create( hWndParent, IDC_MYFORM_LIST )
 SetWindowPos( hList, 0, x, y, cx, cy, SWP_NOZORDER or SWP_SHOWWINDOW )
 
 ' You MUST supply a row painter -- without one, rows are not drawn at all.
-PsListBox_SetPaintCallback( hList, @MyList_PaintRow )
+PsListTree_SetPaintCallback( hList, @MyList_PaintRow )
 
 ' Optional: observe mouse messages, supply tooltips, hear about selection moves.
-PsListBox_SetMessageCallback( hList, @MyList_Message )
-PsListBox_SetTooltipCallback( hList, @MyList_Tooltip )
-PsListBox_SetSelChangeCallback( hList, @MyList_SelChange )
+PsListTree_SetMessageCallback( hList, @MyList_Message )
+PsListTree_SetTooltipCallback( hList, @MyList_Tooltip )
+PsListTree_SetSelChangeCallback( hList, @MyList_SelChange )
 
 ' Appearance. The font is borrowed -- you keep ownership and destroy it yourself.
-PsListBox_SetBackColor( hList, theme.BackColor )
-PsListBox_SetFont( hList, ghFont(GUIFONT_10) )
-PsListBox_SetScrollBarColors( hList, theme.BackColorScrollBar, _
+PsListTree_SetBackColor( hList, theme.BackColor )
+PsListTree_SetFont( hList, ghFont(GUIFONT_10) )
+PsListTree_SetScrollBarColors( hList, theme.BackColorScrollBar, _
                              theme.ForeColorScrollBar, theme.ForeColorScrollBarHot )
 
 ' Selection mode. Both off = single-select.
-PsListBox_SetExtendedSelect( hList, true )     ' Shift ranges / Ctrl toggles
+PsListTree_SetExtendedSelect( hList, true )     ' Shift ranges / Ctrl toggles
 
 ' Bulk load, batched: one map rebuild and one repaint instead of one per row.
-PsListBox_BeginUpdate( hList )
-PsListBox_AddHeader( hList, "Group Alpha" )
+PsListTree_BeginUpdate( hList )
+PsListTree_AddHeader( hList, "Group Alpha" )
 for i as integer = 0 to 20
-    PsListBox_AddString( hList, "Alpha item " & i, 1000 + i )
+    PsListTree_AddString( hList, "Alpha item " & i, 1000 + i )
 next
-PsListBox_EndUpdate( hList )
+PsListTree_EndUpdate( hList )
 
 ' Silent -- the SelChange callback does not fire for this.
-PsListBox_SetCurSel( hList, 1 )
+PsListTree_SetCurSel( hList, 1 )
 ```
 
 And the row painter:
 
 ```freebasic
-sub MyList_PaintRow( byval p as PSLISTBOX_PAINTINFO ptr )
+sub MyList_PaintRow( byval p as PSLISTTREE_PAINTINFO ptr )
     ' State priority is yours to choose: selected > hot > normal is the usual one.
     dim as COLORREF backclr, foreclr
     if p->isSelected then
@@ -198,25 +240,25 @@ end sub
 That is the whole minimum. To turn on report mode, add columns and show the band:
 
 ```freebasic
-PsListBox_AddColumn( hList, "Name", 160 )
-PsListBox_AddColumn( hList, "Size", 70 )
-PsListBox_AddColumn( hList, "Type" )              ' the fill column (default: the last)
-PsListBox_SetHeaderPaintCallback( hList, @MyHeader_PaintColumn )
-PsListBox_SetHeaderBackColor( hList, theme.BackColorScrollBar )
-PsListBox_SetHeaderFont( hList, ghFont(GUIFONTBOLD_10) )
-PsListBox_ShowHeader( hList, true )
+PsListTree_AddColumn( hList, "Name", 160 )
+PsListTree_AddColumn( hList, "Size", 70 )
+PsListTree_AddColumn( hList, "Type" )              ' the fill column (default: the last)
+PsListTree_SetHeaderPaintCallback( hList, @MyHeader_PaintColumn )
+PsListTree_SetHeaderBackColor( hList, theme.BackColorScrollBar )
+PsListTree_SetHeaderFont( hList, ghFont(GUIFONTBOLD_10) )
+PsListTree_ShowHeader( hList, true )
 
 ' Cell text: column 0 IS the row's text; columns 1..N are per-row cells.
-dim as integer r = PsListBox_AddString( hList, "file0.bas" )
-PsListBox_SetCellText( hList, r, 1, "137" )
-PsListBox_SetCellText( hList, r, 2, "FreeBASIC source" )
+dim as integer r = PsListTree_AddString( hList, "file0.bas" )
+PsListTree_SetCellText( hList, r, 1, "137" )
+PsListTree_SetCellText( hList, r, 2, "FreeBASIC source" )
 ```
 
 Your row painter then sees `p->columnCount > 0` and a `p->cells` array — fill the full row
 background first, then draw each cell inside its own rect:
 
 ```freebasic
-dim as integer pad = PsColumnHeader_GetPadding( PsListBox_GetHeader( hList ) )
+dim as integer pad = PsColumnHeader_GetPadding( PsListTree_GetHeader( hList ) )
 for c as integer = 0 to p->columnCount - 1
     dim as RECT rcCell = p->cells[c].rc
     rcCell.left += pad : rcCell.right -= pad
@@ -230,21 +272,21 @@ next
 
 ### The handle is a real HWND
 
-`PsListBox_Create` returns an ordinary window handle, and every `PsListBox_*` function takes it.
+`PsListTree_Create` returns an ordinary window handle, and every `PsListTree_*` function takes it.
 It is not an opaque type, so you can treat the control as the window it is — `SetWindowPos` to
 place and size it, `ShowWindow` to show it, `GetDlgItem` to find it by the `CtrlID` you passed
 at creation.
 
 That handle is the **container**. It hosts three children: the row surface, the scrollbar and
 the header band. Every function resolves them internally. Never pass a child handle to a
-`PsListBox_*` function — results are undefined.
+`PsListTree_*` function — results are undefined.
 
 The children take consecutive control ids: the surface gets `CtrlID`, the scrollbar
 `CtrlID + 1`, the header `CtrlID + 2`. Leave that much room around whatever id you pick.
 
 ### It is created zero-sized and hidden
 
-`PsListBox_Create` gives the container the styles `WS_CHILD`, `WS_CLIPSIBLINGS` and
+`PsListTree_Create` gives the container the styles `WS_CHILD`, `WS_CLIPSIBLINGS` and
 `WS_CLIPCHILDREN`. `WS_VISIBLE` is deliberately absent, so a newly created control shows
 nothing until you size it and show it. That lets you build and configure the list — colours,
 font, columns, contents — before it is ever seen.
@@ -254,24 +296,27 @@ font, columns, contents — before it is ever seen.
 Rows are addressed by the order they were added, independent of what is on screen. Collapsing a
 group does **not** renumber anything, and hidden rows keep working with every row API,
 selection included. Internally the control maps model rows to visible positions; that mapping
-never leaks out. Everything you receive — `PSLISTBOX_PAINTINFO.itemID`,
-`PSLISTBOX_MESSAGEINFO.idx`, `PsListBox_GetCurSel`, `PsListBox_GetSelItems`,
-`PsListBox_GetTopIndex` — is a model index too.
+never leaks out. Everything you receive — `PSLISTTREE_PAINTINFO.itemID`,
+`PSLISTTREE_MESSAGEINFO.idx`, `PsListTree_GetCurSel`, `PsListTree_GetSelItems`,
+`PsListTree_GetTopIndex` — is a model index too.
 
-`PsListBox_GetCount` is every row in the model. `PsListBox_GetVisibleCount` is the rows currently
+`PsListTree_GetCount` is every row in the model. `PsListTree_GetVisibleCount` is the rows currently
 on show. They differ exactly when something is collapsed.
 
-### Groups are flat
+### Groups, and trees
 
-A row is either a header (`PsListBox_AddHeader`) or an item (`PsListBox_AddString`). Items belong
-to the nearest preceding header. There is **one level** — headers do not nest. Collapsing a
-header hides its items until the next header.
+Every row carries a **tree level** (0 = top-level), so the control does hierarchies of any depth —
+see *Tree view and in-place editing* below. The classic flat group is just the depth-1 case: a
+header (`PsListTree_AddHeader`) is a level-0 parent and the items (`PsListTree_AddString`) after it
+are its level-1 children, hidden when the header collapses. Build deeper structure with
+`PsListTree_AddNode`. Collapsing any node hides its entire subtree.
 
 Headers are ordinary rows in every other respect: they are selectable, they are returned by
-`PsListBox_GetSelItems`, and they carry `itemData`. Use `PsListBox_IsHeader` to tell them apart.
+`PsListTree_GetSelItems`, and they carry `itemData`. Use `PsListTree_IsHeader` to tell them apart —
+"header" is now just a styling flag, independent of whether a node has children.
 
-Clicking a header toggles its group and **leaves the selection alone** — it is a fold gesture,
-not a select.
+Clicking a header toggles its group and **leaves the selection alone** — a fold gesture, not a
+select. (A plain `AddNode` parent instead toggles only via its twisty; the label selects.)
 
 ### Selection lives on the rows
 
@@ -282,12 +327,12 @@ the two flags are mutually exclusive:
 | Mode | How to get it | Mouse behaviour |
 |---|---|---|
 | Single | both off (the default) | Each click selects exactly one row |
-| Extended | `PsListBox_SetExtendedSelect( h, true )` | Shift extends a range from the anchor, Ctrl toggles one row |
-| Multiple | `PsListBox_SetMultiSelect( h, true )` | Every click toggles one row, checklist style |
+| Extended | `PsListTree_SetExtendedSelect( h, true )` | Shift extends a range from the anchor, Ctrl toggles one row |
+| Multiple | `PsListTree_SetMultiSelect( h, true )` | Every click toggles one row, checklist style |
 
-Setting either mode clears the other. `PsListBox_GetCurSel` reports the **focused** row (the
+Setting either mode clears the other. `PsListTree_GetCurSel` reports the **focused** row (the
 caret), which is not the same as "the selection" once more than one row can be selected — use
-`PsListBox_GetSelItems` for that.
+`PsListTree_GetSelItems` for that.
 
 ### Everything is painted in one pass
 
@@ -310,9 +355,9 @@ The control creates a `PsVScrollBar`, positions it on the right edge, keeps its 
 with the model, and **auto-hides it whenever the rows fit** — at which point the row surface
 reclaims the full client width. You never call `SetRange` or `SetPos`.
 
-What is left to you is appearance: `PsListBox_SetScrollBarWidth`,
-`PsListBox_SetScrollBarColors`, `PsListBox_SetScrollBarPaintCallback`, or
-`PsListBox_GetScrollBar` for direct `PsVScrollBar_*` calls.
+What is left to you is appearance: `PsListTree_SetScrollBarWidth`,
+`PsListTree_SetScrollBarColors`, `PsListTree_SetScrollBarPaintCallback`, or
+`PsListTree_GetScrollBar` for direct `PsVScrollBar_*` calls.
 
 The mouse wheel is handled on the row surface, not by the bar: one notch scrolls
 `SPI_GETWHEELSCROLLLINES` rows (re-read per message, and capped at one page), with the
@@ -329,20 +374,20 @@ column's x-span. **Group-header rows never get cells** — they always span the 
 `columnCount` is 0 for them regardless.
 
 The column model lives in the embedded `PsColumnHeader`, which is the single store for widths,
-minimums and the fill designation. The `PsListBox_*Column*` functions are wrappers that delegate
+minimums and the fill designation. The `PsListTree_*Column*` functions are wrappers that delegate
 to it. See [PsColumnHeader.md](PsColumnHeader.md) for the width, minimum-width and fill rules.
 
 **Column definitions and cell text are independent.** Cell storage is sparse and per row, so
 you can populate rows before or after defining columns; a cell never set reads back `""`. The
 band itself starts **hidden** — columns still lay out and rows still paint in columns, you
-simply get no interactive header strip until `PsListBox_ShowHeader( h, true )`.
+simply get no interactive header strip until `PsListTree_ShowHeader( h, true )`.
 
 The header band spans the **full container width**, over the scrollbar strip, so column
 geometry never shifts when the scrollbar auto-hides.
 
 ### Column 0 is the row's text
 
-`PsListBox_GetText`/`SetText` and the cell functions with `col = 0` address the same storage.
+`PsListTree_GetText`/`SetText` and the cell functions with `col = 0` address the same storage.
 Columns 1..N live in the row's own sparse cell array. This is why a list written before columns
 existed keeps working unchanged.
 
@@ -352,10 +397,10 @@ column at 0 and each row's text becomes its column 1 cell.
 ### Spanned rows
 
 An ordinary, selectable row can be made to paint as **one cell across the whole column band**
-instead of one cell per column — `PsListBox_SetRowSpanColumns( h, row, true )`. Use it for a
+instead of one cell per column — `PsListTree_SetRowSpanColumns( h, row, true )`. Use it for a
 section note, a "no results" line, or any wide message row that lives among columned rows.
 
-Its text stays in **column 0** (`PsListBox_GetText` / `GetCellText( h, row, 0 )`). At paint time
+Its text stays in **column 0** (`PsListTree_GetText` / `GetCellText( h, row, 0 )`). At paint time
 the callback receives `p->columnCount = 1` with `p->isSpanned = true`; `cells[0].rc` runs from
 column 0's own left to the last column's right (the same left a normal column-0 cell gets, so
 the spanned text lines up under column 0), and `cells[0].wszText` is the column-0 text. A painter
@@ -375,7 +420,7 @@ Group headers are **not** spanned rows — they have their own `isHeader` path a
 
 ### Drag-and-drop reordering
 
-Opt in with `PsListBox_SetDragReorder( h, true )` (default **OFF**) and the user can drag rows to
+Opt in with `PsListTree_SetDragReorder( h, true )` (default **OFF**) and the user can drag rows to
 new positions inside the same list:
 
 - **What drags** — press an item and move past the system drag threshold. If the pressed row is
@@ -396,12 +441,12 @@ The control moves its **own** model and fires two optional callbacks: **`CanDrop
 via `itemData`). This is the only gesture in the control that takes mouse **capture**, and only
 while a drag is actually in progress.
 
-`PsListBox_MoveRows( h, srcRows(), insertBefore )` performs the same reorder programmatically —
+`PsListTree_MoveRows( h, srcRows(), insertBefore )` performs the same reorder programmatically —
 **silent** (no `DragDrop`), like every other setter.
 
 ### Non-selectable rows
 
-A row can be made **non-selectable** — `PsListBox_SetRowSelectable( h, row, false )`. It then
+A row can be made **non-selectable** — `PsListTree_SetRowSelectable( h, row, false )`. It then
 cannot be selected or focused **by any path**, and keyboard navigation skips over it:
 
 - **Mouse** — clicking it changes nothing (no selection, no focus). The host still sees the
@@ -424,26 +469,26 @@ picked).
 ### Batch bulk changes
 
 Every model mutator rebuilds the visible map and repaints. Wrap a bulk load in
-`PsListBox_BeginUpdate` / `PsListBox_EndUpdate` and that collapses to one rebuild and one
+`PsListTree_BeginUpdate` / `PsListTree_EndUpdate` and that collapses to one rebuild and one
 repaint, turning an O(n²) load into O(n). The pairs nest.
 
 ### Programmatic changes are silent
 
-`PsListBox_SetCurSel`, `SetSel`, `SelectAll` and `Clear` never fire the SelChange callback. It
+`PsListTree_SetCurSel`, `SetSel`, `SelectAll` and `Clear` never fire the SelChange callback. It
 reports **user** action only — a click, or a keyboard move. This follows Win32's own
 `LB_SETCURSEL` / `LBN_SELCHANGE` split, and it means you can call the setters from inside your
 own handler without recursing.
 
-The same rule holds for column widths: `PsListBox_SetColumnWidth` repaints but fires no resize
+The same rule holds for column widths: `PsListTree_SetColumnWidth` repaints but fires no resize
 callback. Only a user drag or an autosize notifies.
 
 ### Pixels, and who scales them
 
 | Setting | Unit | Default |
 |---|---|---:|
-| Row height (`PsListBox_SetRowHeight`) | **Unscaled** — DPI-scaled internally | 22 |
-| Header height (`PsListBox_SetHeaderHeight`) | **Unscaled** — DPI-scaled internally | 24 |
-| Scrollbar width (`PsListBox_SetScrollBarWidth`) | **Unscaled** — DPI-scaled at layout | 12 |
+| Row height (`PsListTree_SetRowHeight`) | **Unscaled** — DPI-scaled internally | 22 |
+| Header height (`PsListTree_SetHeaderHeight`) | **Unscaled** — DPI-scaled internally | 24 |
+| Scrollbar width (`PsListTree_SetScrollBarWidth`) | **Unscaled** — DPI-scaled at layout | 12 |
 | Column widths and minimums | **Pixels**, used as given | 100 / 0 |
 | Header caption padding | **Pixels** after create; the default is DPI-scaled at create | 8 |
 
@@ -490,6 +535,84 @@ Fonts you pass in stay yours: the control stores the `HFONT` and never destroys 
 
 ---
 
+## Tree view and in-place editing
+
+![The PsListTree tree demo](tree_demo.png)
+
+The same control, driven as a treeview: unlimited depth, control-drawn twisties, per-depth
+indent, and label editing. `tree_demo.exe` (build it with `build_tree.bat`) is a focused harness
+for exactly these features; `main.exe` (from `build.bat`) exercises everything else.
+
+Every row carries a **tree level** (0 = top-level), and the tree lives in ordinary array order: a
+node's whole subtree is the contiguous run of deeper-level rows right after it, so parent, child
+count and "has children" are all derived — there is no separate tree object to keep in sync.
+Collapsing a node hides its entire subtree, at any depth. The old flat header/item model is just
+the **depth-1** case of this, so nothing about the existing API changed.
+
+### Building a tree
+
+`PsListTree_AddNode( h, parentRow, Text )` appends a child under `parentRow` (`-1` = a new
+top-level node); `PsListTree_InsertNode` places one at a specific child position. Query the shape
+with `PsListTree_GetLevel` / `GetParent` / `GetChildCount` / `HasChildren`.
+
+```freebasic
+dim as integer proj = PsListTree_AddNode( hTree, -1,   "MyProject" )
+dim as integer src  = PsListTree_AddNode( hTree, proj, "src" )
+                      PsListTree_AddNode( hTree, src,  "main.bas" )
+dim as integer eng  = PsListTree_AddNode( hTree, src,  "engine" )
+                      PsListTree_AddNode( hTree, eng,  "render.bas" )
+```
+
+### Twisties and indentation are opt-in
+
+Both default **OFF**, so a control that only builds flat lists or legacy groups is visually
+unchanged. Turn them on for a tree:
+
+```freebasic
+PsListTree_SetTreeIndent( hTree, true )         ' indent column 0 by depth
+PsListTree_ShowTwisty( hTree, true )            ' control draws the chevron + owns its hit-rect
+PsListTree_SetTwistyFont( hTree, hSymbolFont )  ' a Segoe Fluent Icons HFONT
+```
+
+With the twisty on, clicking it toggles the node **without** touching the selection; clicking the
+label selects. (A legacy `AddHeader` row keeps its whole-row toggle.) In your row painter, draw
+your column-0 text at `p->rc.left + p->indent` (that offset already includes the reserved twisty
+band, so parents and leaves at the same depth line up). Only column 0 is indented — other columns
+keep their x. To draw your **own** glyph instead of the built-in chevron, call `ShowTwisty(false)`
+and read `p->rcTwisty` / `p->level` / `p->hasChildren` / `p->isExpanded`.
+
+Keyboard: **Left** collapses an expanded node or jumps to its parent; **Right** expands a
+collapsed node or steps to its first child — at any depth.
+
+### In-place label editing
+
+Opt in with `PsListTree_EnableLabelEdit( h, true )`. An edit starts on **F2** (on the focused row),
+on `PsListTree_BeginEdit`, or — with `PsListTree_SetClickToEdit( h, true )` — on a click of the
+row that is already current (explorer rename). **Enter commits, Esc cancels, clicking away
+commits.** The editor is a single-line `PsTextBox` created over the caption and destroyed on
+commit or cancel; only column 0 (the caption) is editable.
+
+> **Pump obligation.** A host that enables editing MUST call `PsListTree_FilterMessage( @msg )` in
+> its message loop, **ahead of `IsDialogMessage`** — otherwise `IsDialogMessage` eats Enter (as
+> "press the default button") and Esc (as "cancel") before they reach the editor. A host that
+> never enables editing needs no pump call.
+
+```freebasic
+do while GetMessage( @msg, null, 0, 0 )
+    if msg.message = WM_QUIT then exit do
+    if PsListTree_FilterMessage( @msg ) then continue do      ' editing hosts: BEFORE IsDialogMessage
+    if IsDialogMessage( hWnd, @msg ) = 0 then
+        TranslateMessage( @msg ) : DispatchMessage( @msg )
+    end if
+loop
+```
+
+`BeginLabelEdit` can veto an edit before it starts; `EndLabelEdit` receives the new text and can
+reject it (the row keeps its old caption). Register both under *Callback registration*; the
+typedefs are in *Callbacks*.
+
+---
+
 ## Behaviour and limits
 
 Firm properties of the control, not settings:
@@ -498,23 +621,23 @@ Firm properties of the control, not settings:
 - **All rows are the same height.** There is no per-row height, so a group header cannot be
   taller than its items.
 - **Groups do not nest.** One level of headers, and a group runs to the next header.
-- **Text setters do not repaint.** `PsListBox_SetText`, `SetCellText`, `SetItemData` and
+- **Text setters do not repaint.** `PsListTree_SetText`, `SetCellText`, `SetItemData` and
   `SetItemDataExtra` change the model and return — they do not invalidate. Call
-  `PsListBox_Refresh` after changing text on a list that is already on screen.
-- **`PsListBox_SetBackColor` does not repaint either.** It stores the colour and returns the
-  previous one. Set it before showing the control, or follow it with `PsListBox_Refresh`.
+  `PsListTree_Refresh` after changing text on a list that is already on screen.
+- **`PsListTree_SetBackColor` does not repaint either.** It stores the colour and returns the
+  previous one. Set it before showing the control, or follow it with `PsListTree_Refresh`.
 - **Group-header rows never receive cells.** They span the full width even in report mode, so
   `columnCount` is 0 for them.
 - **The control does not clip between cells.** Cell rects are handed to you as computed;
   drawing text wider than its cell will spill into the next one. `DT_END_ELLIPSIS` is the
   answer.
-- **The control never sorts.** `PsListBox_SetColumnClickCallback` is the hook; reordering the
+- **The control never sorts.** `PsListTree_SetColumnClickCallback` is the hook; reordering the
   rows is yours.
 - **The `cells` pointer is valid only during the paint callback.** It points at control-owned
   scratch reused for every row. Copy anything you need to keep.
-- **Cell text survives `PsListBox_ClearColumns`.** Clearing column *definitions* does not clear
+- **Cell text survives `PsListTree_ClearColumns`.** Clearing column *definitions* does not clear
   row *data* — the two are deliberately independent.
-- **`PsListBox_GetColumnWidth` on the fill column returns its laid-out width**, not the stored
+- **`PsListTree_GetColumnWidth` on the fill column returns its laid-out width**, not the stored
   one. Setting a width on the fill column stores it but has no visual effect until that column
   stops being the fill.
 - **The message callback's return value has no effect for the button messages.** For
@@ -523,15 +646,15 @@ Firm properties of the control, not settings:
   collapse handling has **already run** by the time you are called. Returning TRUE suppresses
   `DefWindowProc` only for `WM_MOUSEMOVE`, `WM_MOUSEHOVER`, `WM_MOUSELEAVE` and
   `WM_MOUSEWHEEL`.
-- **`PSLISTBOX_MESSAGEINFO.idx` is filled only for the button and hover messages.** It stays -1
+- **`PSLISTTREE_MESSAGEINFO.idx` is filled only for the button and hover messages.** It stays -1
   for `WM_MOUSEMOVE`, `WM_MOUSELEAVE` and `WM_MOUSEWHEEL`.
 - **Clicks that land below the last row do not reach the message callback at all**, for any
   button message.
 - **The wheel is reported only when it actually scrolls.** A wheel gesture against the end of
   the list does not call the message callback.
 - **The header band's own `WidthChanged` slot belongs to the control.** Subscribe with
-  `PsListBox_SetColumnResizeCallback`, never with `PsColumnHeader_SetWidthChangedCallback` on the
-  handle from `PsListBox_GetHeader`. Every other header callback passes straight through.
+  `PsListTree_SetColumnResizeCallback`, never with `PsColumnHeader_SetWidthChangedCallback` on the
+  handle from `PsListTree_GetHeader`. Every other header callback passes straight through.
 - **No horizontal scrolling.** Columns wider than the client run off the right edge and are
   clipped there.
 - **No in-place editing, no drag-reorder of rows, no checkbox column, no icons.** Anything of
@@ -541,14 +664,14 @@ Firm properties of the control, not settings:
 
 ## API reference
 
-Every function takes the handle from `PsListBox_Create` as its first argument, written `h` in
+Every function takes the handle from `PsListTree_Create` as its first argument, written `h` in
 the tables below.
 
 ### Creation
 
 | Function | Description |
 |---|---|
-| `PsListBox_Create( hWndParent, CtrlID ) as HWND` | Creates the control as a child of `hWndParent` and returns the container's handle. `CtrlID` becomes its `GWLP_ID`; the three children take `CtrlID`, `CtrlID + 1` and `CtrlID + 2`. Created zero-sized and hidden — place it with `SetWindowPos`. |
+| `PsListTree_Create( hWndParent, CtrlID ) as HWND` | Creates the control as a child of `hWndParent` and returns the container's handle. `CtrlID` becomes its `GWLP_ID`; the three children take `CtrlID`, `CtrlID + 1` and `CtrlID + 2`. Created zero-sized and hidden — place it with `SetWindowPos`. |
 
 ### Content
 
@@ -556,56 +679,64 @@ the tables below.
 
 | Function | Description |
 |---|---|
-| `PsListBox_AddString( h, Text, itemData = 0, itemDataExtra = 0 ) as integer` | Appends an item row. |
-| `PsListBox_AddHeader( h, Text, itemData = 0, itemDataExtra = 0 ) as integer` | Appends a group-header row. Items added after it belong to this group until the next header. |
-| `PsListBox_InsertString( h, row, Text, itemData = 0, itemDataExtra = 0 ) as integer` | Inserts an item at `row`, shifting later rows down. `row` is clamped to `[0, count]` and the index actually used is returned. Inserts an **item**, never a header. |
-| `PsListBox_DeleteString( h, row ) as boolean` | Deletes the row. FALSE for an invalid index. |
-| `PsListBox_Clear( h )` | Removes every row. Also resets the focus and anchor rows to -1, so a stale caret cannot survive into the next list. Silent. |
-| `PsListBox_GetCount( h ) as integer` | Every row in the model. |
-| `PsListBox_GetVisibleCount( h ) as integer` | Rows currently on show — headers plus the items of expanded groups. |
-| `PsListBox_GetText( h, row ) as DWSTRING` | The row's text, which is also its column 0 cell. `""` for an invalid row. |
-| `PsListBox_SetText( h, row, Text ) as boolean` | Sets it. FALSE for an invalid row. **Does not repaint** — call `PsListBox_Refresh` if the list is on screen. |
-| `PsListBox_GetCellText( h, row, col ) as DWSTRING` | Column `col`'s text for that row. `col = 0` is the row's own text. A cell never set — and any `col` beyond what the row stores — reads `""`, as does a negative `col`. |
-| `PsListBox_SetCellText( h, row, col, Text ) as boolean` | Sets it, growing the row's sparse cell storage as needed. FALSE for an invalid row or a negative `col`. A `col` beyond the defined columns is legal storage: it simply paints once a matching column exists. **Does not repaint.** |
-| `PsListBox_GetItemData( h, row ) as integer` | The row's user value. 0 for an invalid row. |
-| `PsListBox_SetItemData( h, row, itemData ) as boolean` | Sets it. FALSE for an invalid row. **Does not repaint.** |
-| `PsListBox_GetItemDataExtra( h, row ) as integer` | The row's second user value. |
-| `PsListBox_SetItemDataExtra( h, row, itemDataExtra ) as boolean` | Sets it. FALSE for an invalid row. **Does not repaint.** |
-| `PsListBox_BeginUpdate( h )` | Suspends the rebuild-and-repaint that every model mutator would otherwise do. Nests. |
-| `PsListBox_EndUpdate( h )` | Ends one nesting level; the outermost one refreshes once. |
-| `PsListBox_Refresh( h )` | Rebuilds the visible map, re-derives the scroll position and the scrollbar, and repaints with a background erase. |
+| `PsListTree_AddString( h, Text, itemData = 0, itemDataExtra = 0 ) as integer` | Appends an item row. |
+| `PsListTree_AddHeader( h, Text, itemData = 0, itemDataExtra = 0 ) as integer` | Appends a group-header row. Items added after it belong to this group until the next header. |
+| `PsListTree_InsertString( h, row, Text, itemData = 0, itemDataExtra = 0 ) as integer` | Inserts an item at `row`, shifting later rows down. `row` is clamped to `[0, count]` and the index actually used is returned. Inserts an **item**, never a header. |
+| `PsListTree_AddNode( h, parentRow, Text, itemData = 0, itemDataExtra = 0 ) as integer` | Appends a child under `parentRow` (`-1` = a new top-level node), after the parent's whole existing subtree, at `parent.level + 1`. Returns the new model index, or -1. See *Tree view and in-place editing*. |
+| `PsListTree_InsertNode( h, parentRow, childIndex, Text, itemData = 0, itemDataExtra = 0 ) as integer` | Inserts among `parentRow`'s direct children at `childIndex` (clamped; past the end appends). `parentRow = -1` inserts a top-level node. Returns the new model index, or -1. |
+| `PsListTree_DeleteString( h, row ) as boolean` | Deletes the one row. FALSE for an invalid index. To remove a whole subtree, delete the parent's descendants first (see `GetChildCount` / `GetLevel`). |
+| `PsListTree_Clear( h )` | Removes every row. Also resets the focus and anchor rows to -1, so a stale caret cannot survive into the next list. Silent. |
+| `PsListTree_GetCount( h ) as integer` | Every row in the model. |
+| `PsListTree_GetVisibleCount( h ) as integer` | Rows currently on show — headers plus the items of expanded groups. |
+| `PsListTree_GetText( h, row ) as DWSTRING` | The row's text, which is also its column 0 cell. `""` for an invalid row. |
+| `PsListTree_SetText( h, row, Text ) as boolean` | Sets it. FALSE for an invalid row. **Does not repaint** — call `PsListTree_Refresh` if the list is on screen. |
+| `PsListTree_GetCellText( h, row, col ) as DWSTRING` | Column `col`'s text for that row. `col = 0` is the row's own text. A cell never set — and any `col` beyond what the row stores — reads `""`, as does a negative `col`. |
+| `PsListTree_SetCellText( h, row, col, Text ) as boolean` | Sets it, growing the row's sparse cell storage as needed. FALSE for an invalid row or a negative `col`. A `col` beyond the defined columns is legal storage: it simply paints once a matching column exists. **Does not repaint.** |
+| `PsListTree_GetItemData( h, row ) as integer` | The row's user value. 0 for an invalid row. |
+| `PsListTree_SetItemData( h, row, itemData ) as boolean` | Sets it. FALSE for an invalid row. **Does not repaint.** |
+| `PsListTree_GetItemDataExtra( h, row ) as integer` | The row's second user value. |
+| `PsListTree_SetItemDataExtra( h, row, itemDataExtra ) as boolean` | Sets it. FALSE for an invalid row. **Does not repaint.** |
+| `PsListTree_BeginUpdate( h )` | Suspends the rebuild-and-repaint that every model mutator would otherwise do. Nests. |
+| `PsListTree_EndUpdate( h )` | Ends one nesting level; the outermost one refreshes once. |
+| `PsListTree_Refresh( h )` | Rebuilds the visible map, re-derives the scroll position and the scrollbar, and repaints with a background erase. |
 
-### Groups
+### Groups and trees
 
-Collapse, expand and toggle act only on header rows and return FALSE for an item or an invalid
-index.
+Collapse, expand and toggle act on anything that **can** fold — a legacy header or any node with
+children — and return FALSE for a leaf or an invalid index. The tree queries read the derived
+structure and work whether the nodes were built with `AddNode` or with `AddHeader`/`AddString`.
 
 | Function | Description |
 |---|---|
-| `PsListBox_IsHeader( h, row ) as boolean` | Is this row a group header? |
-| `PsListBox_IsCollapsed( h, row ) as boolean` | Is this header collapsed? FALSE for an item. |
-| `PsListBox_CollapseRow( h, row ) as boolean` | Collapses the group. TRUE for any header, whether or not it was already collapsed; only an actual change refreshes. |
-| `PsListBox_ExpandRow( h, row ) as boolean` | Expands the group, same convention. |
-| `PsListBox_ToggleRow( h, row ) as boolean` | Flips it. |
-| `PsListBox_CollapseAll( h ) as boolean` | Collapses every header in one refresh. |
-| `PsListBox_ExpandAll( h ) as boolean` | Expands every header in one refresh. |
+| `PsListTree_IsHeader( h, row ) as boolean` | Is this row a group header (a styling flag)? |
+| `PsListTree_IsCollapsed( h, row ) as boolean` | Is this node collapsed? |
+| `PsListTree_CollapseRow( h, row ) as boolean` | Collapses the node, hiding its whole subtree. TRUE for any foldable node; only an actual change refreshes. |
+| `PsListTree_ExpandRow( h, row ) as boolean` | Expands the node, same convention. |
+| `PsListTree_ToggleRow( h, row ) as boolean` | Flips it. |
+| `PsListTree_SetNodeCollapsed( h, row, bCollapsed ) as boolean` | Sets the collapsed state directly. FALSE for a leaf or invalid row. **Silent.** |
+| `PsListTree_CollapseAll( h ) as boolean` | Collapses every foldable node in one refresh. |
+| `PsListTree_ExpandAll( h ) as boolean` | Expands every foldable node in one refresh. |
+| `PsListTree_GetLevel( h, row ) as integer` | The node's tree depth (0 = top-level), or -1 for an invalid row. |
+| `PsListTree_GetParent( h, row ) as integer` | The model index of the node's parent, or -1 for a top-level node / invalid row. |
+| `PsListTree_GetChildCount( h, row ) as integer` | Number of **direct** children. |
+| `PsListTree_HasChildren( h, row ) as boolean` | Whether the node has any children. |
 
 ### Selection and state
 
 | Function | Description |
 |---|---|
-| `PsListBox_GetCurSel( h ) as integer` | The **focused** row's model index, or -1. |
-| `PsListBox_SetCurSel( h, row ) as integer` | Focuses `row`, selects only it, sets the anchor there, and scrolls it into view if it is off-page. Returns `row`. An invalid index instead clears the whole selection and the focus and returns -1. **Silent** — the SelChange callback does not fire. A row hidden under a collapsed header keeps the focus but does not scroll. |
-| `PsListBox_GetSel( h, row ) as boolean` | Is that row selected? Works for hidden rows and headers. |
-| `PsListBox_SetSel( h, row, state ) as boolean` | Sets one row's selected flag and repaints. FALSE for an invalid row. Does not move the focus. **Silent.** |
-| `PsListBox_GetSelCount( h ) as integer` | How many rows are selected, hidden ones included. |
-| `PsListBox_GetSelItems( h, selItems() ) as integer` | Redims `selItems()` to the model indices of every selected row, ascending, and returns the count. With nothing selected the array is erased and 0 returned. |
-| `PsListBox_SelectAll( h, state )` | Sets every row's selected flag to `state` and repaints. **Silent.** |
-| `PsListBox_SetMultiSelect( h, enable ) as boolean` | Checklist mode: every click toggles one row. Enabling it turns extended mode off. |
-| `PsListBox_SetExtendedSelect( h, enable ) as boolean` | Explorer mode: Shift extends a range from the anchor, Ctrl toggles. Enabling it turns multiple mode off. |
-| `PsListBox_PreventDoubleClick( h, enable = true ) as boolean` | Opts out of double-click reporting. With `CS_DBLCLKS` a double-click delivers down, up, **dblclk**, up — the dblclk substituting for the second down — so a host acting on `WM_LBUTTONUP` acts twice. Enabled, the dblclk still applies the ordinary click to the model (selection, header toggle) but is never surfaced, and the trailing second up is swallowed too: you see exactly one down/up pair per double-click. |
-| `PsListBox_GetTopIndex( h ) as integer` | The model index of the first displayed row, or -1 when nothing is visible. |
-| `PsListBox_SetTopIndex( h, row ) as integer` | Scrolls so `row` is at the top. A row hidden under a collapsed header resolves to its group header, so any valid model row may be passed without checking collapse state. The scroll is clamped — never past the point where the last row sits at the bottom of the viewport — and the **clamped** result is returned. -1 for an invalid row. |
+| `PsListTree_GetCurSel( h ) as integer` | The **focused** row's model index, or -1. |
+| `PsListTree_SetCurSel( h, row ) as integer` | Focuses `row`, selects only it, sets the anchor there, and scrolls it into view if it is off-page. Returns `row`. An invalid index instead clears the whole selection and the focus and returns -1. **Silent** — the SelChange callback does not fire. A row hidden under a collapsed header keeps the focus but does not scroll. |
+| `PsListTree_GetSel( h, row ) as boolean` | Is that row selected? Works for hidden rows and headers. |
+| `PsListTree_SetSel( h, row, state ) as boolean` | Sets one row's selected flag and repaints. FALSE for an invalid row. Does not move the focus. **Silent.** |
+| `PsListTree_GetSelCount( h ) as integer` | How many rows are selected, hidden ones included. |
+| `PsListTree_GetSelItems( h, selItems() ) as integer` | Redims `selItems()` to the model indices of every selected row, ascending, and returns the count. With nothing selected the array is erased and 0 returned. |
+| `PsListTree_SelectAll( h, state )` | Sets every row's selected flag to `state` and repaints. **Silent.** |
+| `PsListTree_SetMultiSelect( h, enable ) as boolean` | Checklist mode: every click toggles one row. Enabling it turns extended mode off. |
+| `PsListTree_SetExtendedSelect( h, enable ) as boolean` | Explorer mode: Shift extends a range from the anchor, Ctrl toggles. Enabling it turns multiple mode off. |
+| `PsListTree_PreventDoubleClick( h, enable = true ) as boolean` | Opts out of double-click reporting. With `CS_DBLCLKS` a double-click delivers down, up, **dblclk**, up — the dblclk substituting for the second down — so a host acting on `WM_LBUTTONUP` acts twice. Enabled, the dblclk still applies the ordinary click to the model (selection, header toggle) but is never surfaced, and the trailing second up is swallowed too: you see exactly one down/up pair per double-click. |
+| `PsListTree_GetTopIndex( h ) as integer` | The model index of the first displayed row, or -1 when nothing is visible. |
+| `PsListTree_SetTopIndex( h, row ) as integer` | Scrolls so `row` is at the top. A row hidden under a collapsed header resolves to its group header, so any valid model row may be passed without checking collapse state. The scroll is clamped — never past the point where the last row sits at the bottom of the viewport — and the **clamped** result is returned. -1 for an invalid row. |
 
 ### Drag-and-drop reordering
 
@@ -614,23 +745,57 @@ functions under *Callback registration*.
 
 | Function | Description |
 |---|---|
-| `PsListBox_SetDragReorder( h, enable = true ) as boolean` | Turns drag-reorder on or off (default OFF). Turning it off also cancels any drag in progress. |
-| `PsListBox_GetDragReorder( h ) as boolean` | Whether drag-reorder is enabled. |
-| `PsListBox_MoveRows( h, srcRows() as integer, insertBefore ) as integer` | Moves the given MODEL rows so they land contiguously before `insertBefore` (a MODEL index; `GetCount()` appends). Sources may be non-contiguous and any order; they are de-duplicated, kept in original relative order, and **headers among them are ignored**. Selection travels with each row. The moved block becomes the focus/anchor. Returns the block's new first index, or -1 if nothing moved. **Silent** (no `DragDrop`); repaints. |
-| `PsListBox_SetDragIndicatorColor( h, clr ) as COLORREF` | Sets the insertion-line / header-highlight colour and returns the previous one. |
-| `PsListBox_GetDragIndicatorColor( h ) as COLORREF` | The current indicator colour. |
+| `PsListTree_SetDragReorder( h, enable = true ) as boolean` | Turns drag-reorder on or off (default OFF). Turning it off also cancels any drag in progress. |
+| `PsListTree_GetDragReorder( h ) as boolean` | Whether drag-reorder is enabled. |
+| `PsListTree_MoveRows( h, srcRows() as integer, insertBefore ) as integer` | Moves the given MODEL rows so they land contiguously before `insertBefore` (a MODEL index; `GetCount()` appends). Sources may be non-contiguous and any order; they are de-duplicated, kept in original relative order, and **headers among them are ignored**. Selection travels with each row. The moved block becomes the focus/anchor. Returns the block's new first index, or -1 if nothing moved. **Silent** (no `DragDrop`); repaints. |
+| `PsListTree_SetDragIndicatorColor( h, clr ) as COLORREF` | Sets the insertion-line / header-highlight colour and returns the previous one. |
+| `PsListTree_GetDragIndicatorColor( h ) as COLORREF` | The current indicator colour. |
 
 ### Appearance
 
 | Function | Description |
 |---|---|
-| `PsListBox_GetBackColor( h ) as COLORREF` | The colour behind the rows, including the strip below the last one. |
-| `PsListBox_SetBackColor( h, clr ) as COLORREF` | Sets it and returns the previous value. **Does not repaint** — set it before showing, or follow with `PsListBox_Refresh`. |
-| `PsListBox_GetRowHeight( h ) as integer` | The row height in **unscaled** units. |
-| `PsListBox_SetRowHeight( h, height ) as integer` | Sets it and returns what you passed. Unscaled units — the control DPI-scales it, so do not pre-scale. Repaints and re-syncs the scrollbar, since rows-per-page changed. The scaled result is floored at 1 pixel. |
-| `PsListBox_GetFont( h ) as HFONT` | The font selected into the buffer before each row callback. |
-| `PsListBox_SetFont( h, hFont ) as boolean` | Sets it and repaints. **Borrowed, never owned** — keep it alive and destroy it yourself. Your paint callback may select a different font per row. |
-| `PsListBox_SetHoverTime( h, milliseconds )` | How long the cursor must rest on a row before `WM_MOUSEHOVER` and the tooltip. Default 250. |
+| `PsListTree_GetBackColor( h ) as COLORREF` | The colour behind the rows, including the strip below the last one. |
+| `PsListTree_SetBackColor( h, clr ) as COLORREF` | Sets it and returns the previous value. **Does not repaint** — set it before showing, or follow with `PsListTree_Refresh`. |
+| `PsListTree_GetRowHeight( h ) as integer` | The row height in **unscaled** units. |
+| `PsListTree_SetRowHeight( h, height ) as integer` | Sets it and returns what you passed. Unscaled units — the control DPI-scales it, so do not pre-scale. Repaints and re-syncs the scrollbar, since rows-per-page changed. The scaled result is floored at 1 pixel. |
+| `PsListTree_GetFont( h ) as HFONT` | The font selected into the buffer before each row callback. |
+| `PsListTree_SetFont( h, hFont ) as boolean` | Sets it and repaints. **Borrowed, never owned** — keep it alive and destroy it yourself. Your paint callback may select a different font per row. |
+| `PsListTree_SetHoverTime( h, milliseconds )` | How long the cursor must rest on a row before `WM_MOUSEHOVER` and the tooltip. Default 250. |
+
+### Tree appearance
+
+All OFF / zero-effect by default, so a flat or grouped list is untouched. Widths are **unscaled**
+units, DPI-scaled internally. See *Tree view and in-place editing*.
+
+| Function | Description |
+|---|---|
+| `PsListTree_SetTreeIndent( h, enable = true ) as boolean` | Turns per-depth indentation of column 0 on/off. |
+| `PsListTree_GetTreeIndent( h ) as boolean` | Whether tree indent is on. |
+| `PsListTree_SetIndentWidth( h, nWidth ) as integer` | Per-level indent in unscaled units (default 16). Returns the stored value; repaints. |
+| `PsListTree_GetIndentWidth( h ) as integer` | The per-level indent width. |
+| `PsListTree_ShowTwisty( h, enable = true ) as boolean` | Has the control draw the expand/collapse chevron and own its hit-rect. |
+| `PsListTree_IsTwistyShown( h ) as boolean` | Whether the twisty is shown. |
+| `PsListTree_SetTwistyWidth( h, nWidth )` | Reserved twisty-band width in unscaled units (default 16). |
+| `PsListTree_SetTwistyColor( h, clr )` | The glyph colour. |
+| `PsListTree_SetTwistyFont( h, hFont )` | The symbol font for the glyph, borrowed not owned — a Segoe Fluent Icons `HFONT`. |
+| `PsListTree_SetTwistyGlyphs( h, wszExpanded, wszCollapsed )` | Overrides the two glyphs (default ChevronDown / ChevronRight). |
+
+### In-place label editing
+
+Opt-in. **Enabling it establishes a pump obligation:** call `PsListTree_FilterMessage` in the loop,
+before `IsDialogMessage`. See *Tree view and in-place editing*.
+
+| Function | Description |
+|---|---|
+| `PsListTree_EnableLabelEdit( h, enable = true ) as boolean` | Turns label editing on/off. Turning it off ends any edit in progress (as a cancel). |
+| `PsListTree_IsLabelEditEnabled( h ) as boolean` | Whether editing is enabled. |
+| `PsListTree_SetClickToEdit( h, enable = true ) as boolean` | When on (default OFF), a click on the already-current row starts an edit. |
+| `PsListTree_BeginEdit( h, row, col = 0 ) as boolean` | Starts an edit of `row`. FALSE if editing is off, the row is invalid / non-selectable / hidden, or `BeginLabelEdit` vetoes. Only `col = 0` is wired. |
+| `PsListTree_EndEdit( h, bCommit = true ) as boolean` | Ends the current edit. `bCommit` runs it through `EndLabelEdit` and writes the text; returns TRUE if the model was actually written. |
+| `PsListTree_IsEditing( h ) as boolean` | Whether an edit is in progress. |
+| `PsListTree_GetEditRow( h ) as integer` | The model row being edited, or -1. |
+| `PsListTree_FilterMessage( pMsg ) as boolean` | **Pump call** for editing hosts (before `IsDialogMessage`). Claims Enter/Esc for the active editor and forwards to its context menu. Returns TRUE if consumed; safe to call always. |
 
 ### Scrollbar
 
@@ -638,10 +803,10 @@ Nothing here is required; the control creates, positions, ranges and auto-hides 
 
 | Function | Description |
 |---|---|
-| `PsListBox_GetScrollBar( h ) as HWND` | The scrollbar child, for direct `PsVScrollBar_*` calls. |
-| `PsListBox_SetScrollBarWidth( h, nWidth )` | Track width in **unscaled** units, DPI-scaled at layout. Clamped to a minimum of 1. Re-lays out immediately. |
-| `PsListBox_SetScrollBarColors( h, backclr, foreclr, foreclrhot )` | Track background, thumb, and thumb-under-cursor. |
-| `PsListBox_SetScrollBarPaintCallback( h, usersub )` | Installs a `VScrollPaintCallbackSub` that draws the bar instead of its built-in painter. |
+| `PsListTree_GetScrollBar( h ) as HWND` | The scrollbar child, for direct `PsVScrollBar_*` calls. |
+| `PsListTree_SetScrollBarWidth( h, nWidth )` | Track width in **unscaled** units, DPI-scaled at layout. Clamped to a minimum of 1. Re-lays out immediately. |
+| `PsListTree_SetScrollBarColors( h, backclr, foreclr, foreclrhot )` | Track background, thumb, and thumb-under-cursor. |
+| `PsListTree_SetScrollBarPaintCallback( h, usersub )` | Installs a `VScrollPaintCallbackSub` that draws the bar instead of its built-in painter. |
 
 ### Columns and the header band
 
@@ -650,46 +815,49 @@ for the layout rules these delegate to.
 
 | Function | Description |
 |---|---|
-| `PsListBox_AddColumn( h, Text, nWidth = 100, nMinWidth = 0, itemData = 0 ) as integer` | Appends a column and returns its index, or -1. `nMinWidth = 0` means the control's own scaled floor applies. |
-| `PsListBox_InsertColumn( h, idx, Text, nWidth = 100, nMinWidth = 0, itemData = 0 ) as integer` | Inserts at `idx` (clamped to `[0, count]`) and returns the index used. **Shifts every row's cell storage** to match, across the column-0 / row-text alias. |
-| `PsListBox_DeleteColumn( h, idx ) as boolean` | Deletes the column and shifts every row's cells down. Deleting column 0 promotes each row's column 1 cell to its text. FALSE for a bad index. |
-| `PsListBox_ClearColumns( h )` | Removes every column definition. Row **cell text is untouched** and reappears if columns are defined again. |
-| `PsListBox_GetColumnCount( h ) as integer` | How many columns are defined. |
-| `PsListBox_GetColumnText( h, idx ) as DWSTRING` | The column's caption. |
-| `PsListBox_SetColumnText( h, idx, Text ) as boolean` | Sets it and repaints that header cell only — row cells are unaffected. FALSE for a bad index. |
-| `PsListBox_GetColumnWidth( h, idx ) as integer` | The column's width in pixels, already raised to its effective minimum. For the fill column this is the **laid-out** width, not the stored one. |
-| `PsListBox_SetColumnWidth( h, idx, nWidth ) as boolean` | Stores the width, clamped up to the column's effective minimum, and repaints the rows. **Silent** — no resize callback. On the fill column the value is stored but has no visual effect until that column stops being the fill. |
-| `PsListBox_GetColumnMinWidth( h, idx ) as integer` | The column's own stored minimum. 0 means "use the control default". |
-| `PsListBox_SetColumnMinWidth( h, idx, nMinWidth ) as boolean` | Sets it; negatives become 0. Re-lays out and repaints. |
-| `PsListBox_GetFillColumn( h ) as integer` | The **resolved** index of the column that absorbs leftover width, or -1 if none. |
-| `PsListBox_SetFillColumn( h, idx ) as boolean` | Takes a column index, `CCOLHDR_FILL_LAST` (the default) or `CCOLHDR_FILL_NONE`. FALSE for an index that is neither valid nor one of those two constants. |
-| `PsListBox_ShowHeader( h, bShow = true ) as boolean` | Shows or hides the interactive header strip. Hidden is the default; columns lay out and rows paint in columns either way. Changes the surface height, so it re-lays out and re-syncs the scrollbar. |
-| `PsListBox_IsHeaderVisible( h ) as boolean` | Is the band currently shown? |
-| `PsListBox_GetHeaderHeight( h ) as integer` | Band height in **unscaled** units. |
-| `PsListBox_SetHeaderHeight( h, height ) as integer` | Sets it, clamped to a minimum of 1, and returns the clamped value. Unscaled units — do not pre-scale. |
-| `PsListBox_GetHeader( h ) as HWND` | The header child, for direct `PsColumnHeader_*` calls (padding, hit-tests, theming). **Do not set its WidthChanged callback** — that slot belongs to this control. |
-| `PsListBox_SetRowSpanColumns( h, row, bSpan = true ) as boolean` | Makes an ordinary (selectable) row paint as one cell spanning every column instead of one per column; its text stays in column 0. The painter gets `columnCount = 1` and `p->isSpanned = true`. **Silent, and repaints.** FALSE for an invalid row. See *Spanned rows* above. |
-| `PsListBox_GetRowSpanColumns( h, row ) as boolean` | Whether that row is spanned. FALSE for an invalid row. |
-| `PsListBox_SetRowSelectable( h, row, bSelectable = true ) as boolean` | Sets whether the row can be selected/focused. `false` makes it non-selectable on every path (mouse, keyboard, programmatic) and keyboard nav skips it; marking a live selected/focused row non-selectable clears its selection and drops the caret. **Silent, and repaints.** FALSE for an invalid row. See *Non-selectable rows* above. |
-| `PsListBox_GetRowSelectable( h, row ) as boolean` | Whether the row can be selected (default TRUE). FALSE for an invalid row. |
+| `PsListTree_AddColumn( h, Text, nWidth = 100, nMinWidth = 0, itemData = 0 ) as integer` | Appends a column and returns its index, or -1. `nMinWidth = 0` means the control's own scaled floor applies. |
+| `PsListTree_InsertColumn( h, idx, Text, nWidth = 100, nMinWidth = 0, itemData = 0 ) as integer` | Inserts at `idx` (clamped to `[0, count]`) and returns the index used. **Shifts every row's cell storage** to match, across the column-0 / row-text alias. |
+| `PsListTree_DeleteColumn( h, idx ) as boolean` | Deletes the column and shifts every row's cells down. Deleting column 0 promotes each row's column 1 cell to its text. FALSE for a bad index. |
+| `PsListTree_ClearColumns( h )` | Removes every column definition. Row **cell text is untouched** and reappears if columns are defined again. |
+| `PsListTree_GetColumnCount( h ) as integer` | How many columns are defined. |
+| `PsListTree_GetColumnText( h, idx ) as DWSTRING` | The column's caption. |
+| `PsListTree_SetColumnText( h, idx, Text ) as boolean` | Sets it and repaints that header cell only — row cells are unaffected. FALSE for a bad index. |
+| `PsListTree_GetColumnWidth( h, idx ) as integer` | The column's width in pixels, already raised to its effective minimum. For the fill column this is the **laid-out** width, not the stored one. |
+| `PsListTree_SetColumnWidth( h, idx, nWidth ) as boolean` | Stores the width, clamped up to the column's effective minimum, and repaints the rows. **Silent** — no resize callback. On the fill column the value is stored but has no visual effect until that column stops being the fill. |
+| `PsListTree_GetColumnMinWidth( h, idx ) as integer` | The column's own stored minimum. 0 means "use the control default". |
+| `PsListTree_SetColumnMinWidth( h, idx, nMinWidth ) as boolean` | Sets it; negatives become 0. Re-lays out and repaints. |
+| `PsListTree_GetFillColumn( h ) as integer` | The **resolved** index of the column that absorbs leftover width, or -1 if none. |
+| `PsListTree_SetFillColumn( h, idx ) as boolean` | Takes a column index, `CCOLHDR_FILL_LAST` (the default) or `CCOLHDR_FILL_NONE`. FALSE for an index that is neither valid nor one of those two constants. |
+| `PsListTree_ShowHeader( h, bShow = true ) as boolean` | Shows or hides the interactive header strip. Hidden is the default; columns lay out and rows paint in columns either way. Changes the surface height, so it re-lays out and re-syncs the scrollbar. |
+| `PsListTree_IsHeaderVisible( h ) as boolean` | Is the band currently shown? |
+| `PsListTree_GetHeaderHeight( h ) as integer` | Band height in **unscaled** units. |
+| `PsListTree_SetHeaderHeight( h, height ) as integer` | Sets it, clamped to a minimum of 1, and returns the clamped value. Unscaled units — do not pre-scale. |
+| `PsListTree_GetHeader( h ) as HWND` | The header child, for direct `PsColumnHeader_*` calls (padding, hit-tests, theming). **Do not set its WidthChanged callback** — that slot belongs to this control. |
+| `PsListTree_SetRowSpanColumns( h, row, bSpan = true ) as boolean` | Makes an ordinary (selectable) row paint as one cell spanning every column instead of one per column; its text stays in column 0. The painter gets `columnCount = 1` and `p->isSpanned = true`. **Silent, and repaints.** FALSE for an invalid row. See *Spanned rows* above. |
+| `PsListTree_GetRowSpanColumns( h, row ) as boolean` | Whether that row is spanned. FALSE for an invalid row. |
+| `PsListTree_SetRowSelectable( h, row, bSelectable = true ) as boolean` | Sets whether the row can be selected/focused. `false` makes it non-selectable on every path (mouse, keyboard, programmatic) and keyboard nav skips it; marking a live selected/focused row non-selectable clears its selection and drops the caret. **Silent, and repaints.** FALSE for an invalid row. See *Non-selectable rows* above. |
+| `PsListTree_GetRowSelectable( h, row ) as boolean` | Whether the row can be selected (default TRUE). FALSE for an invalid row. |
 
 ### Callback registration
 
 | Function | Description |
 |---|---|
-| `PsListBox_SetPaintCallback( h, usersub )` | Installs the row painter. **Required** — no rows are drawn without one. |
-| `PsListBox_SetMessageCallback( h, userfunc )` | Installs an observer for the mouse messages. |
-| `PsListBox_SetTooltipCallback( h, userfunc )` | Installs the on-demand tooltip text supplier. Unset, the row's own text is used. |
-| `PsListBox_SetSelChangeCallback( h, usersub )` | Installs the handler told when the **user** moves the selection, by mouse or keyboard. |
-| `PsListBox_SetCanDropCallback( h, userfunc )` | Installs the drag-reorder **veto** (fires before a drop; return FALSE to reject). See below. |
-| `PsListBox_SetDragDropCallback( h, usersub )` | Installs the drag-reorder **notify** (fires after a user drop). See below. |
-| `PsListBox_SetColumnResizeCallback( h, usersub )` | Installs the handler told when the **user** resizes a column. This is the correct door — the header's own slot is taken. |
-| `PsListBox_SetColumnClickCallback( h, usersub )` | Installs the completed-click-on-a-column-body handler. Passes straight through to the header. |
-| `PsListBox_SetColumnAutoSizeCallback( h, userfunc )` | Installs the divider-double-click best-fit measurer. Passes straight through. |
-| `PsListBox_SetHeaderPaintCallback( h, usersub )` | Installs the per-column header cell painter. Passes straight through. |
-| `PsListBox_SetHeaderTooltipCallback( h, userfunc )` | Installs the per-column tooltip text supplier. Passes straight through. |
-| `PsListBox_SetHeaderBackColor( h, clr )` | The band's flat background. Passes straight through. |
-| `PsListBox_SetHeaderFont( h, hFont )` | The band's font, borrowed not owned. Passes straight through. |
+| `PsListTree_SetPaintCallback( h, usersub )` | Installs the row painter. **Required** — no rows are drawn without one. |
+| `PsListTree_SetMessageCallback( h, userfunc )` | Installs an observer for the mouse messages. |
+| `PsListTree_SetTooltipCallback( h, userfunc )` | Installs the on-demand tooltip text supplier. Unset, the row's own text is used. |
+| `PsListTree_SetSelChangeCallback( h, usersub )` | Installs the handler told when the **user** moves the selection, by mouse or keyboard. |
+| `PsListTree_SetBeginLabelEditCallback( h, userfunc )` | Installs the pre-edit **veto** (return FALSE to block an edit). See below. |
+| `PsListTree_SetEndLabelEditCallback( h, userfunc )` | Installs the commit handler (return FALSE to reject the new text). See below. |
+| `PsListTree_SetExpandCollapseCallback( h, usersub )` | Installs the handler told when the **user** expands/collapses a node. Silent for the programmatic collapse/expand setters. See below. |
+| `PsListTree_SetCanDropCallback( h, userfunc )` | Installs the drag-reorder **veto** (fires before a drop; return FALSE to reject). See below. |
+| `PsListTree_SetDragDropCallback( h, usersub )` | Installs the drag-reorder **notify** (fires after a user drop). See below. |
+| `PsListTree_SetColumnResizeCallback( h, usersub )` | Installs the handler told when the **user** resizes a column. This is the correct door — the header's own slot is taken. |
+| `PsListTree_SetColumnClickCallback( h, usersub )` | Installs the completed-click-on-a-column-body handler. Passes straight through to the header. |
+| `PsListTree_SetColumnAutoSizeCallback( h, userfunc )` | Installs the divider-double-click best-fit measurer. Passes straight through. |
+| `PsListTree_SetHeaderPaintCallback( h, usersub )` | Installs the per-column header cell painter. Passes straight through. |
+| `PsListTree_SetHeaderTooltipCallback( h, userfunc )` | Installs the per-column tooltip text supplier. Passes straight through. |
+| `PsListTree_SetHeaderBackColor( h, clr )` | The band's flat background. Passes straight through. |
+| `PsListTree_SetHeaderFont( h, hFont )` | The band's font, borrowed not owned. Passes straight through. |
 
 Passing 0 to any callback setter clears it.
 
@@ -705,11 +873,11 @@ What the control itself owns:
 
 | Setting | Paints |
 |---|---|
-| `PsListBox_SetBackColor` | The row surface's whole client, including the strip below the last row. Filled before any row callback runs, and the only thing painted when no callback is set |
-| `PsListBox_SetScrollBarColors` — `backclr` | The scrollbar track |
-| `PsListBox_SetScrollBarColors` — `foreclr` | The scrollbar thumb, idle |
-| `PsListBox_SetScrollBarColors` — `foreclrhot` | The scrollbar thumb, cursor over it or dragging |
-| `PsListBox_SetHeaderBackColor` | The header band's flat background, behind the column cells |
+| `PsListTree_SetBackColor` | The row surface's whole client, including the strip below the last row. Filled before any row callback runs, and the only thing painted when no callback is set |
+| `PsListTree_SetScrollBarColors` — `backclr` | The scrollbar track |
+| `PsListTree_SetScrollBarColors` — `foreclr` | The scrollbar thumb, idle |
+| `PsListTree_SetScrollBarColors` — `foreclrhot` | The scrollbar thumb, cursor over it or dragging |
+| `PsListTree_SetHeaderBackColor` | The header band's flat background, behind the column cells |
 
 ### Which colour wins
 
@@ -748,14 +916,14 @@ listview-style, then draw each cell inside `cells[i].rc`.
 
 ## Callbacks
 
-The four `PsListBox` typedefs are **unprefixed** — `PaintCallbackSub`, `MessageCallbackFunc`,
+The four `PsListTree` typedefs are **unprefixed** — `PaintCallbackSub`, `MessageCallbackFunc`,
 `TooltipCallbackFunc` and `SelChangeCallbackSub` occupy those exact names. If you are combining
 these files with other controls, that is a name collision to check for.
 
 ### Row paint
 
 ```freebasic
-type PaintCallbackSub as sub( byval p as PSLISTBOX_PAINTINFO ptr )
+type PaintCallbackSub as sub( byval p as PSLISTTREE_PAINTINFO ptr )
 ```
 
 Draws one row. Called once per visible row on every repaint, so keep it cheap. Paint through
@@ -763,7 +931,7 @@ Draws one row. Called once per visible row on every repaint, so keep it cheap. P
 already filled the client with `BackColor` and selected the control font into the buffer; you
 may override the font per row.
 
-`PSLISTBOX_PAINTINFO`:
+`PSLISTTREE_PAINTINFO`:
 
 | Field | Meaning |
 |---|---|
@@ -778,8 +946,13 @@ may override the font per row.
 | `isSpanned` | This row spans every column — see below and *Spanned rows* |
 | `isSelectable` | FALSE if the host made the row non-selectable — grey it if you like; the control does the blocking (see *Non-selectable rows*) |
 | `wszCaption` | The row's text (column 0) |
+| `level` | Tree depth, 0 = top-level (see *Tree view and in-place editing*) |
+| `hasChildren` | The node has at least one child |
+| `isExpanded` | `NOT isCollapsed`, read for a parent node |
+| `indent` | Pixel offset to apply to your **column 0** text, from the tree depth (0 unless `SetTreeIndent` is on; already includes the reserved twisty band) |
+| `rcTwisty` | The expand/collapse glyph's rect, in the same coords as `rc`; **empty** for a leaf or when the twisty is off. Read it to draw your own glyph after setting `ShowTwisty(false)` |
 | `columnCount` | Number of cells in `cells`: 0 for a full-width row, **1** for a spanned row over defined columns, else one per column |
-| `cells` | Array of `PSLISTBOX_CELLINFO`, or **null** when `columnCount` is 0 |
+| `cells` | Array of `PSLISTTREE_CELLINFO`, or **null** when `columnCount` is 0 |
 
 `columnCount` is 0 and `cells` is null whenever the row should paint as one full-width cell with
 no columns to fill: no columns are defined, **or** the row is a group header.
@@ -791,7 +964,7 @@ defined it is already full-width, `columnCount = 0`, and only `isSpanned` marks 
 Whenever you fill the row background from `p->rc` before drawing cells, selection and hover cover
 the whole row in every case.
 
-`PSLISTBOX_CELLINFO`:
+`PSLISTTREE_CELLINFO`:
 
 | Field | Meaning |
 |---|---|
@@ -808,13 +981,13 @@ the whole row in every case.
 ### Message
 
 ```freebasic
-type MessageCallbackFunc as function( byval m as PSLISTBOX_MESSAGEINFO ptr ) as boolean
+type MessageCallbackFunc as function( byval m as PSLISTTREE_MESSAGEINFO ptr ) as boolean
 ```
 
 Observes mouse messages on the row surface. Return TRUE to suppress the control's remaining
 handling of that message, FALSE to let it proceed.
 
-`PSLISTBOX_MESSAGEINFO`:
+`PSLISTTREE_MESSAGEINFO`:
 
 | Field | Meaning |
 |---|---|
@@ -836,7 +1009,7 @@ Which messages arrive, and what the return value actually does:
 | `WM_LBUTTONDOWN` | the pressed row | Only when the press lands **on a row** | **No** |
 | `WM_LBUTTONUP` | the released-over row | Only when the release lands on a row | **No** |
 | `WM_RBUTTONDOWN` | the row under the cursor | Only over a row | **No** |
-| `WM_LBUTTONDBLCLK` | the row under the cursor | Over a row, and not while `PsListBox_PreventDoubleClick` is on | **No** |
+| `WM_LBUTTONDBLCLK` | the row under the cursor | Over a row, and not while `PsListTree_PreventDoubleClick` is on | **No** |
 
 The button messages are consumed by the surface either way, which is why the return value
 cannot change them. More importantly, **the control's own handling has already happened** by
@@ -865,31 +1038,50 @@ type SelChangeCallbackSub as sub( byval hListControl as HWND, byval row as integ
 The **user** moved the selection — by clicking a row, or by moving the caret with the keyboard
 (arrows, PageUp/Down, Home/End, Left to a header, Space). `row` is the model index of the newly
 focused row, or -1 if there is none. Fires after the control's state is updated, so
-`PsListBox_GetCurSel` already agrees.
+`PsListTree_GetCurSel` already agrees.
 
 This is the only way to observe **keyboard** navigation, because the control consumes
 `WM_KEYDOWN` itself and it never reaches the message callback. A mouse-only host can keep using
 `WM_LBUTTONUP` in the message callback instead.
 
-It does **not** fire for `PsListBox_SetCurSel`, `SetSel`, `SelectAll` or `Clear`, which is what
+It does **not** fire for `PsListTree_SetCurSel`, `SetSel`, `SelectAll` or `Clear`, which is what
 makes those safe to call from inside this handler. Nor does it fire when the user re-selects
 the row that is already current, or when a clamped arrow key does not actually move the caret —
 only a real change notifies.
 
+### Label editing and expand/collapse
+
+```freebasic
+type BeginLabelEditCallbackFunc as function( byval h as HWND, byval row as integer ) as boolean
+type EndLabelEditCallbackFunc   as function( byval h as HWND, byval row as integer, byval newText as DWSTRING ) as boolean
+type ExpandCollapseCallbackSub  as sub( byval h as HWND, byval row as integer, byval bExpanded as boolean )
+```
+
+`BeginLabelEdit` fires just before an in-place edit begins; return FALSE to veto it (no editor
+appears). `EndLabelEdit` fires when the user **commits** (Enter or focus loss), with the edited
+text; return FALSE to reject it and keep the old caption, TRUE (or leave it unset) to write it.
+Neither fires on Esc-cancel. `newText` is **byval** — never take it `byref const` (a copied
+`const DWSTRING` corrupts the heap).
+
+`ExpandCollapse` fires when the **user** folds a node — by clicking its twisty, by Left/Right, or
+by clicking a legacy header — with the new state in `bExpanded`. Like the other user-action
+callbacks it is **silent** for the programmatic `CollapseRow` / `ExpandRow` / `ToggleRow` /
+`SetNodeCollapsed` / `CollapseAll` / `ExpandAll` setters, so you can drive those from inside it.
+
 ### Drag and drop
 
 ```freebasic
-type PSLISTBOX_DROPINFO
+type PSLISTTREE_DROPINFO
     hList        as HWND
     srcRows      as integer ptr           ' the MODEL indices being dragged (srcCount of them)
     srcCount     as integer
     insertBefore as integer               ' MODEL index the block will land before (0..rowCount)
     onHeader     as boolean               ' TRUE = dropped on a header (block becomes its first children)
     targetRow    as integer               ' MODEL index of the drop-target row, or -1 at the list end
-    targetInfo   as PSLISTBOX_ROWINFO ptr ' the target row's ROWINFO (read-only), or NULL at the end
+    targetInfo   as PSLISTTREE_ROWINFO ptr ' the target row's ROWINFO (read-only), or NULL at the end
 end type
 
-type CanDropCallbackFunc as function( byval p as PSLISTBOX_DROPINFO ptr ) as boolean
+type CanDropCallbackFunc as function( byval p as PSLISTTREE_DROPINFO ptr ) as boolean
 type DragDropCallbackSub as sub( byval hList as HWND, byval newFirstRow as integer, byval count as integer )
 ```
 
@@ -901,15 +1093,15 @@ keep and do not mutate the model from inside. Unset = every drop is allowed.
 **`DragDrop`** fires just after a user drop moves rows. `newFirstRow` is the model index the moved
 block now starts at and `count` is how many rows moved — walk `newFirstRow .. newFirstRow+count-1`
 with the getters (or `itemData`) to resync a parallel model. It does **not** fire for
-`PsListBox_MoveRows` (programmatic moves are silent, like every other setter).
+`PsListTree_MoveRows` (programmatic moves are silent, like every other setter).
 
 ### Header callbacks
 
-The five header callbacks registered through `PsListBox_Set*` use the `HDR_*` typedefs and are
+The five header callbacks registered through `PsListTree_Set*` use the `HDR_*` typedefs and are
 documented in full in [PsColumnHeader.md](PsColumnHeader.md). Two notes specific to using them
-through `PsListBox`:
+through `PsListTree`:
 
-- **`PsListBox_SetColumnResizeCallback` is the only correct door for resize notifications.** The
+- **`PsListTree_SetColumnResizeCallback` is the only correct door for resize notifications.** The
   header's own `WidthChanged` slot is taken by this control, which needs it to repaint the rows
   on every live drag before re-broadcasting to you.
 - The `hHeader` parameter these callbacks receive is the **header** window, not the control.
@@ -919,12 +1111,12 @@ through `PsListBox`:
 
 ## Constants
 
-Defined in `PsListBox.bi`:
+Defined in `PsListTree.bi`:
 
 | Constant | Value | Meaning |
 |---|---:|---|
-| `IDT_CLISTBOX_HOTTRACK` | `&hCB01` | Timer id for the hover safety-net poll. Timer ids are per-window, so every instance shares it |
-| `PSLISTBOX_HOTTRACK_MS` | 100 | How often that poll checks whether the cursor has left |
+| `IDT_CLISTTREE_HOTTRACK` | `&hCB01` | Timer id for the hover safety-net poll. Timer ids are per-window, so every instance shares it |
+| `PSLISTTREE_HOTTRACK_MS` | 100 | How often that poll checks whether the cursor has left |
 
 Defaults the control starts with:
 
@@ -938,7 +1130,7 @@ Defaults the control starts with:
 | Selection mode | single | — |
 | Column width / minimum width | 100 / 0 | Pixels |
 
-The fill-column designations passed to `PsListBox_SetFillColumn` come from `PsColumnHeader.bi`:
+The fill-column designations passed to `PsListTree_SetFillColumn` come from `PsColumnHeader.bi`:
 
 | Constant | Value | Meaning |
 |---|---:|---|
@@ -949,16 +1141,16 @@ The fill-column designations passed to `PsListBox_SetFillColumn` come from `PsCo
 
 ## Related controls
 
-`PsListBox` creates and owns two other controls. You never create either one, and both are
+`PsListTree` creates and owns two other controls. You never create either one, and both are
 destroyed with the list.
 
 | Control | Role | Reached through |
 |---|---|---|
-| **PsColumnHeader** | The column model and the interactive header band. It is the single store for column widths, minimums, geometry and the fill designation — the `PsListBox_*Column*` functions all delegate to it. See [PsColumnHeader.md](PsColumnHeader.md) | `PsListBox_GetHeader` |
-| **PsVScrollBar** | The owner-drawn vertical scrollbar, ranged and auto-hidden by the list | `PsListBox_GetScrollBar` |
+| **PsColumnHeader** | The column model and the interactive header band. It is the single store for column widths, minimums, geometry and the fill designation — the `PsListTree_*Column*` functions all delegate to it. See [PsColumnHeader.md](PsColumnHeader.md) | `PsListTree_GetHeader` |
+| **PsVScrollBar** | The owner-drawn vertical scrollbar, ranged and auto-hidden by the list | `PsListTree_GetScrollBar` |
 
 Both handles are escape hatches for appearance and queries. Two things you must not do through
-them: do not set the header's `WidthChanged` callback (use `PsListBox_SetColumnResizeCallback`),
+them: do not set the header's `WidthChanged` callback (use `PsListTree_SetColumnResizeCallback`),
 and do not call `PsVScrollBar_SetRange` or `PsVScrollBar_SetScrollCallback` — the list owns the
 range and the scroll notification, and overwriting either desynchronises the thumb from the
 list.

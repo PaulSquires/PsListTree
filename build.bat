@@ -1,6 +1,6 @@
 @echo off
 rem ========================================================================================
-rem  PsListBox demo harness build script.
+rem  PsListTree demo harness build script.
 rem
 rem  Usage:  build.bat          builds main.exe
 rem          build.bat clean    deletes build output
