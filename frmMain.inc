@@ -1464,6 +1464,19 @@ sub frmMain_RunSelfTest()
         (nGotNo < nInsetPx), "unset=" & str(nGotNo) & " inset=" & str(nInsetPx) )
     PsListTree_EnableLabelEdit( HWND_FRMEXPLORER2, false )
 
+    ' ---- 10n. THE SURFACE MUST CLIP ITS CHILDREN. It paints every visible row in ONE pass
+    '           over its whole client, and the in-place editor is a CHILD of it -- so without
+    '           WS_CLIPCHILDREN the row painting goes over the editor and blanks the text being
+    '           typed. Z-order is irrelevant: a parent painting without it covers its children
+    '           whatever the order, which is why raising the editor did not help.
+    '
+    '           This asserts the STYLE BIT, which is the mechanism itself. It cannot assert the
+    '           pixels: proving "the editor survived a repaint" needs a forced repaint, and a
+    '           forced repaint is exactly what made the text come back in the bug report.
+    dim as LONG_PTR stySurf = GetWindowLongPtrW( hSurfMv, GWL_STYLE )
+    SelfTest_Check( "the row surface clips its children", _
+        ((stySurf and WS_CLIPCHILDREN) <> 0), "style=&h" & hex(stySurf) )
+
     ' ---- 11. Border chrome ------------------------------------------------------------
     '  The border is drawn by the CONTAINER and its whole mechanism is that PositionWindows
     '  insets every child by the width. So the assertable claim is not "a frame was painted"
