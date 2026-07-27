@@ -2710,21 +2710,28 @@ function PsListTree_BeginEditInternal( byval pList as PSLISTTREE ptr, byval row 
             xRight = rcCol0.right
         end if
     end if
-    if xRight < xLeft + 8 then xRight = xLeft + 8
-    SetWindowPos( pList->hEdit, HWND_TOP, xLeft, rcRow.top, xRight - xLeft, rcRow.bottom - rcRow.top, SWP_SHOWWINDOW )
-
     ' Line the editor's TEXT up with the cell text the host painted. The box itself covers the
     ' whole cell -- that part is right -- but PsTextBox puts its RichEdit `borderWidth` inside
     ' the box and then applies its margins on top of that, so the text starts at
     ' borderWidth + marginLeft. The host's inset is measured from the CELL edge, so the margin
-    ' has to be the difference. Without this the text jumps left by the host's inset the moment
-    ' an edit opens, and no longer lines up with the rows above and below.
+    ' has to be the difference. Without this the text starts at borderWidth and no longer lines
+    ' up with the rows above and below.
+    '
+    ' SET BEFORE THE SIZE AND BEFORE THE TEXT, and the order is the whole point. PsTextBox
+    ' re-applies its stored margins from PositionRichEdit on every WM_SIZE (EM_SETRECT and the
+    ' margins interact, so it has to), which means a margin set AFTER the SetWindowPos below
+    ' reaches the control only once the text has already been laid out: the text redrew at the
+    ' new offset on the next unrelated repaint while the CARET stayed at the old one, so the
+    ' caret sat a character-width away from the end of the text it was supposedly at.
     if pList->nEditTextInset >= 0 then
         dim as integer bw = PsTextBox_GetBorderWidth( pList->hEdit )
         dim as integer nMargin = pList->nEditTextInset - bw
         if nMargin < 0 then nMargin = 0
         PsTextBox_SetMargins( pList->hEdit, nMargin, 0 )
     end if
+
+    if xRight < xLeft + 8 then xRight = xLeft + 8
+    SetWindowPos( pList->hEdit, HWND_TOP, xLeft, rcRow.top, xRight - xLeft, rcRow.bottom - rcRow.top, SWP_SHOWWINDOW )
 
     ' Seed with the cell's current text.
     dim as PSLISTTREE_ROWINFO ptr pRow = pList->GetRow( row )

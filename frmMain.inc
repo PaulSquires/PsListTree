@@ -1424,6 +1424,12 @@ sub frmMain_RunSelfTest()
     '           Measured with EM_POSFROMCHAR on the REAL RichEdit and mapped into the surface's
     '           coordinates, which is the space the column rect is in -- not re-derived from the
     '           borderWidth + margin arithmetic under test. ----
+    ' THE FIRST EDIT IS ITS OWN CASE. The editor is created lazily and kept for the
+    '           instance's life, so every assertion after the first one runs against an editor
+    '           that already exists and is already margined. Toggling label editing off destroys
+    '           it (EnableLabelEdit(false) ends any edit), which is the only way back to the
+    '           create path a user hits on their FIRST double-click.
+    PsListTree_EnableLabelEdit( HWND_FRMEXPLORER2, false )     ' destroys the editor
     PsListTree_EnableLabelEdit( HWND_FRMEXPLORER2, true )
     PsListTree_SetCellText( HWND_FRMEXPLORER2, 0, 2, "abcdef" )
     dim as integer nInsetPx = 6
