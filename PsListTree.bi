@@ -166,6 +166,11 @@ type TooltipCallbackFunc as function( byval hListControl as HWND, byval row as i
 ' re-entering itself. Nor is it fired when the user re-selects the row that is already
 ' current -- only an actual change notifies.
 type SelChangeCallbackSub as sub( byval hListControl as HWND, byval row as integer )
+' The row's DEFAULT ACTION -- double-click, or ENTER on the focused row. One callback for both
+' because they are one concept (ListView's LVN_ITEMACTIVATE, PsCalendar's DateActivated); a host
+' that wired them separately would have to keep two handlers in step. User gestures only, never
+' a programmatic selection change.
+type ActivateCallbackSub as sub( byval hListControl as HWND, byval row as integer )
 
 ' ----------------------------------------------------------------------------------------
 ' Drag-and-drop row reordering (opt-in via PsListTree_SetDragReorder). The user drags a row,
@@ -342,6 +347,7 @@ type PSLISTTREE
     MessageCallback as MessageCallbackFunc
     TooltipCallback as TooltipCallbackFunc    ' optional; defaults to the row's Text
     SelChangeCallback as SelChangeCallbackSub ' optional; user-driven selection changes only
+    ActivateCallback  as ActivateCallbackSub  ' optional; double-click / ENTER on a row
     CanDropCallback   as CanDropCallbackFunc  ' optional; pre-drop veto (drag reorder)
     DragDropCallback  as DragDropCallbackSub  ' optional; post-drop notify (drag reorder)
     ' --- Persistent scratch for PAINTINFO.cells, re-dimensioned only when the column
@@ -1102,6 +1108,11 @@ declare sub      PsListTree_SetPaintCallback( byval hListControl as HWND, byval 
 declare sub      PsListTree_SetMessageCallback( byval hListControl as HWND, byval userfunc as MessageCallbackFunc )
 declare sub      PsListTree_SetTooltipCallback( byval hListControl as HWND, byval userfunc as TooltipCallbackFunc )
 declare sub      PsListTree_SetSelChangeCallback( byval hListControl as HWND, byval usersub as SelChangeCallbackSub )
+' The row's default action: double-click, or ENTER on the focused row. Setting it is what makes
+' the control claim ENTER (per-message DLGC_WANTALLKEYS, plus the WM_CHAR swallow) -- with no
+' callback set, ENTER is left alone and reaches the host's default button as before.
+' SetEnterEdits WINS over this: a list whose ENTER opens an editor does not also activate.
+declare sub      PsListTree_SetActivateCallback( byval hListControl as HWND, byval usersub as ActivateCallbackSub )
 ' Tree callbacks. BeginLabelEdit/EndLabelEdit gate in-place editing; ExpandCollapse reports
 ' a USER expand/collapse (silent for the programmatic collapse/expand setters).
 declare sub      PsListTree_SetBeginLabelEditCallback( byval hListControl as HWND, byval userfunc as BeginLabelEditCallbackFunc )
