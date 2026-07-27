@@ -3609,8 +3609,13 @@ function PsListTree_Create( byval hWndParent as HWND, byval CtrlID as integer ) 
         bClassRegistered = true
     end if
 
+    ' WS_CLIPCHILDREN is load-bearing, not decoration. The surface paints every visible row in
+    ' ONE pass over its whole client, and the in-place editor is a CHILD of it -- without this
+    ' the row painting goes straight over the editor, blanking the text being typed until some
+    ' later repaint of the editor brought it back. Z-order does not help: a parent painting
+    ' without WS_CLIPCHILDREN covers its children whatever the order.
     dim as HWND hList = CreateWindowExW( 0, @wszSurfClass, "", _
-            WS_CHILD or WS_VISIBLE or WS_CLIPSIBLINGS or WS_TABSTOP, _
+            WS_CHILD or WS_VISIBLE or WS_CLIPSIBLINGS or WS_CLIPCHILDREN or WS_TABSTOP, _
             0, 0, 0, 0, hForm, cast(HMENU, cast(LONG_PTR, pList->idc_ListTree)), _
             GetModuleHandleW( NULL ), NULL )
     pList->hTooltip = PsListTree_AddTooltip( hList )
