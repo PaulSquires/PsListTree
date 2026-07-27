@@ -600,6 +600,7 @@ function PsListTree_SetText( byval hListControl as HWND, byval row as integer, b
     if pList = null then return false
     if pList->IsValidRow(row) then
         pList->GetRow(row)->Text = Text
+        pList->NotifyChange()       ' see the note on SetCellText below
         return true     ' success
     end if
     return false  ' invalid row
@@ -635,6 +636,16 @@ function PsListTree_SetCellText( byval hListControl as HWND, byval row as intege
         pList->rows(row).EnsureCells( col )
         pList->rows(row).cells(col - 1) = Text
     end if
+    ' EVERY model mutator notifies. These two were the exceptions, and the result was a setter
+    ' that changed what the row says and left the old text on screen until an unrelated repaint
+    ' came along -- a host reasonably assumed writing a cell showed it, and reaching for
+    ' AfxRedrawWindow on the control handle does not help either, because the rows are painted
+    ' by the surface CHILD.
+    '
+    ' It costs a bulk loop nothing: NotifyChange is coalesced by updateDepth, so anything already
+    ' wrapped in BeginUpdate/EndUpdate -- which is what this control's own docs tell a caller to
+    ' do for bulk loads -- collapses to the single Refresh it always did.
+    pList->NotifyChange()
     return true
 end function
 

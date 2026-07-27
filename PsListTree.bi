@@ -865,6 +865,10 @@ declare function PsListTree_GetVisibleCount( byval hListControl as HWND ) as int
 '   set reads back "", and cell text is independent of the column DEFINITIONS, so rows
 '   can be populated before or after columns are added. col < 0 fails; col beyond the
 '   defined columns is legal storage (it paints once a matching column exists).
+'
+'   BOTH SETTERS REPAINT, like every other model mutator here. Wrap a bulk loop in
+'   BeginUpdate/EndUpdate as usual and it collapses to one Refresh; without the wrapper each
+'   call repaints, which is the correct-but-slower behaviour rather than the silent one.
 ' ----------------------------------------------------------------------------------------
 declare function PsListTree_GetText( byval hListControl as HWND, byval row as integer ) as DWSTRING
 declare function PsListTree_SetText( byval hListControl as HWND, byval row as integer, byval Text as DWSTRING ) as boolean

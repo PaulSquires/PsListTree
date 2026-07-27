@@ -1477,6 +1477,43 @@ sub frmMain_RunSelfTest()
     SelfTest_Check( "the row surface clips its children", _
         ((stySurf and WS_CLIPCHILDREN) <> 0), "style=&h" & hex(stySurf) )
 
+    ' ---- 10o. THE TEXT SETTERS REPAINT. SetText and SetCellText were the only model mutators
+    '           that did not call NotifyChange, so writing a cell changed what the row SAYS and
+    '           left the old text on screen until an unrelated repaint came along. A host cannot
+    '           work around it by redrawing the control handle either -- that is the CONTAINER,
+    '           and the rows are painted by its surface child.
+    '
+    '           Observed through the surface's UPDATE REGION, which is what Refresh actually
+    '           produces (InvalidateRect on the surface). Validate first so the region seen
+    '           afterwards can only have come from the call under test.
+    ValidateRect( hSurfMv, NULL )
+    dim as RECT rcUpd
+    dim as boolean hadUpdBefore = (GetUpdateRect( hSurfMv, @rcUpd, FALSE ) <> 0)
+    PsListTree_SetCellText( HWND_FRMEXPLORER2, 1, 2, "notify_probe" )
+    dim as boolean okCellInval = (GetUpdateRect( hSurfMv, @rcUpd, FALSE ) <> 0)
+    SelfTest_Check( "SetCellText invalidates the surface", _
+        okCellInval andalso (hadUpdBefore = false), _
+        "before=" & str(hadUpdBefore) & " after=" & str(okCellInval) )
+
+    ValidateRect( hSurfMv, NULL )
+    PsListTree_SetText( HWND_FRMEXPLORER2, 1, "notify_probe_caption" )
+    SelfTest_Check( "SetText invalidates the surface", _
+        (GetUpdateRect( hSurfMv, @rcUpd, FALSE ) <> 0), "" )
+
+    ' ...and a BeginUpdate batch still coalesces, so a bulk load costs exactly one Refresh at
+    ' the end rather than one per cell. This is the half that makes the change cheap.
+    ValidateRect( hSurfMv, NULL )
+    PsListTree_BeginUpdate( HWND_FRMEXPLORER2 )
+    for i as integer = 0 to 5
+        PsListTree_SetCellText( HWND_FRMEXPLORER2, 1, 2, "batch" & str(i) )
+    next
+    dim as boolean okQuietInBatch = (GetUpdateRect( hSurfMv, @rcUpd, FALSE ) = 0)
+    PsListTree_EndUpdate( HWND_FRMEXPLORER2 )
+    dim as boolean okLoudAtEnd = (GetUpdateRect( hSurfMv, @rcUpd, FALSE ) <> 0)
+    SelfTest_Check( "inside BeginUpdate the setters stay quiet; EndUpdate repaints once", _
+        okQuietInBatch andalso okLoudAtEnd, _
+        "duringBatch=" & str(okQuietInBatch) & " atEnd=" & str(okLoudAtEnd) )
+
     ' ---- 11. Border chrome ------------------------------------------------------------
     '  The border is drawn by the CONTAINER and its whole mechanism is that PositionWindows
     '  insets every child by the width. So the assertable claim is not "a frame was painted"
