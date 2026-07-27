@@ -1217,6 +1217,82 @@ sub frmMain_RunSelfTest()
         "edit=" & SelfTest_RectStr(rcEditMv0) & " col0=" & SelfTest_RectStr(rcCol0Mv) )
     PsListTree_EndEdit( HWND_FRMEXPLORER2, false )
 
+    ' ---- 10i. THE GESTURE COLUMN. F2, ENTER and click-to-edit used to be hard-wired to
+    '           column 0, so a host whose editable column was not the caption had no way to
+    '           reach it: the control consumes WM_KEYDOWN itself, so the key gestures never
+    '           surface in a message callback. SetEditColumn redirects all three. ----
+    SelfTest_Check( "SetEditColumn defaults to 0", _
+        (PsListTree_GetEditColumn(HWND_FRMEXPLORER2) = 0), _
+        "col=" & str(PsListTree_GetEditColumn(HWND_FRMEXPLORER2)) )
+    PsListTree_SetEditColumn( HWND_FRMEXPLORER2, 2 )
+    SelfTest_Check( "SetEditColumn round-trips", _
+        (PsListTree_GetEditColumn(HWND_FRMEXPLORER2) = 2), _
+        "col=" & str(PsListTree_GetEditColumn(HWND_FRMEXPLORER2)) )
+
+    ' F2 now opens the gesture column. Driven as a real WM_KEYDOWN on the SURFACE, which is
+    ' where the control handles keys -- not by calling BeginEdit, which would prove nothing.
+    PsListTree_SetCurSel( HWND_FRMEXPLORER2, 0 )
+    SendMessageW( hSurfMv, WM_KEYDOWN, VK_F2, 0 )
+    dim as boolean okF2Editing = PsListTree_IsEditing( HWND_FRMEXPLORER2 )
+    dim as integer nF2Col = PsListTree_GetEditCol( HWND_FRMEXPLORER2 )
+    PsListTree_EndEdit( HWND_FRMEXPLORER2, false )
+    SelfTest_Check( "F2 opens the gesture column, not column 0", _
+        okF2Editing andalso (nF2Col = 2), "editing=" & str(okF2Editing) & " col=" & str(nF2Col) )
+
+    ' ENTER is OPT-IN and off by default: with it off the key must be left entirely alone, so
+    ' the host's default button still works. Asserted NEGATIVELY -- this is the assertion that
+    ' goes red if someone "simplifies" ENTER into the same branch as F2.
+    SendMessageW( hSurfMv, WM_KEYDOWN, VK_RETURN, 0 )
+    dim as boolean okEnterOff = (PsListTree_IsEditing(HWND_FRMEXPLORER2) = false)
+    SelfTest_Check( "ENTER does NOT edit while SetEnterEdits is off", okEnterOff, _
+        "editing=" & str(PsListTree_IsEditing(HWND_FRMEXPLORER2)) )
+
+    ' ...and WM_GETDLGCODE must not be claiming ENTER either, or IsDialogMessage stops handing
+    ' it to the dialog even though the control does nothing with it.
+    dim mDlgEnter as MSG
+    mDlgEnter.hwnd    = hSurfMv
+    mDlgEnter.message = WM_KEYDOWN
+    mDlgEnter.wParam  = VK_RETURN
+    dim as LRESULT dcOff = SendMessageW( hSurfMv, WM_GETDLGCODE, VK_RETURN, cast(LPARAM, @mDlgEnter) )
+    SelfTest_Check( "WM_GETDLGCODE does NOT claim ENTER while the option is off", _
+        ((dcOff and DLGC_WANTALLKEYS) = 0), "code=&h" & hex(dcOff) )
+
+    PsListTree_SetEnterEdits( HWND_FRMEXPLORER2, true )
+
+    ' Claimed now -- but ONLY for an ENTER keydown. An arrow must not drag WANTALLKEYS in with
+    ' it, or the claim swallows Tab and breaks the host's navigation (PsToggle's rule).
+    dim as LRESULT dcOn = SendMessageW( hSurfMv, WM_GETDLGCODE, VK_RETURN, cast(LPARAM, @mDlgEnter) )
+    dim mDlgDown as MSG
+    mDlgDown.hwnd    = hSurfMv
+    mDlgDown.message = WM_KEYDOWN
+    mDlgDown.wParam  = VK_DOWN
+    dim as LRESULT dcDown = SendMessageW( hSurfMv, WM_GETDLGCODE, VK_DOWN, cast(LPARAM, @mDlgDown) )
+    SelfTest_Check( "WM_GETDLGCODE claims ENTER per-message only", _
+        ((dcOn and DLGC_WANTALLKEYS) <> 0) andalso ((dcDown and DLGC_WANTALLKEYS) = 0), _
+        "enter=&h" & hex(dcOn) & " down=&h" & hex(dcDown) )
+
+    ' ENTER opens the gesture column.
+    PsListTree_SetCurSel( HWND_FRMEXPLORER2, 0 )
+    SendMessageW( hSurfMv, WM_KEYDOWN, VK_RETURN, 0 )
+    dim as boolean okEnterEditing = PsListTree_IsEditing( HWND_FRMEXPLORER2 )
+    dim as integer nEnterCol = PsListTree_GetEditCol( HWND_FRMEXPLORER2 )
+    SelfTest_Check( "ENTER opens the gesture column", _
+        okEnterEditing andalso (nEnterCol = 2), _
+        "editing=" & str(okEnterEditing) & " col=" & str(nEnterCol) )
+
+    ' ...and the WM_CHAR it manufactures is swallowed, or DefWindowProc BEEPS on every press.
+    ' Read through the probe, NOT through the WM_CHAR return: DefWindowProc answers WM_CHAR with
+    ' 0 exactly as the swallow does, so the obvious `rChar = 0` version of this assertion passes
+    ' with the swallow deleted. It was written that way first and the A/B caught it.
+    dim as boolean okArmed = PsListTree_IsCharSwallowArmed( HWND_FRMEXPLORER2 )
+    SendMessageW( hSurfMv, WM_CHAR, VK_RETURN, 0 )
+    dim as boolean okDisarmed = (PsListTree_IsCharSwallowArmed(HWND_FRMEXPLORER2) = false)
+    PsListTree_EndEdit( HWND_FRMEXPLORER2, false )
+    SelfTest_Check( "ENTER arms the WM_CHAR swallow and the char consumes it", _
+        okArmed andalso okDisarmed, "armed=" & str(okArmed) & " disarmed=" & str(okDisarmed) )
+
+    PsListTree_SetEnterEdits( HWND_FRMEXPLORER2, false )
+    PsListTree_SetEditColumn( HWND_FRMEXPLORER2, 0 )
     PsListTree_EnableLabelEdit( HWND_FRMEXPLORER2, false )
 
     ' ---- 11. Border chrome ------------------------------------------------------------

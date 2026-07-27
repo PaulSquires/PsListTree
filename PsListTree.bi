@@ -312,7 +312,12 @@ type PSLISTTREE
     bClickToEdit    as boolean = false    ' single click on the already-current row starts an edit (default OFF)
     hEdit           as HWND               ' the PsTextBox editor child (0 = not editing)
     editRow         as integer = -1       ' MODEL row being edited (-1 = none)
-    editCol         as integer = 0        ' column being edited (0 = caption; >0 reserved for later)
+    editCol         as integer = 0        ' column being edited (0 = the row's caption)
+    ' Which column the GESTURES open -- F2, Enter and click-to-edit. Default 0, so a host that
+    ' never calls SetEditColumn keeps the original caption-renaming behaviour exactly. It does
+    ' NOT constrain PsListTree_BeginEdit, which always takes its column explicitly.
+    editGestureCol  as integer = 0
+    bEnterEdits     as boolean = false    ' ENTER starts an edit (see SetEnterEdits; default OFF)
     bEditTearingDown as boolean = false   ' guards the re-entrant commit that DestroyWindow's focus loss triggers
     BeginLabelEditCallback as BeginLabelEditCallbackFunc  ' optional pre-edit veto
     EndLabelEditCallback   as EndLabelEditCallbackFunc    ' optional commit accept/reject
@@ -998,6 +1003,19 @@ declare sub      PsListTree_SetTwistyGlyphs( byval hListControl as HWND, byval w
 declare function PsListTree_EnableLabelEdit( byval hListControl as HWND, byval enable as boolean = true ) as boolean
 declare function PsListTree_IsLabelEditEnabled( byval hListControl as HWND ) as boolean
 declare function PsListTree_SetClickToEdit( byval hListControl as HWND, byval enable as boolean = true ) as boolean
+' The column F2 / ENTER / click-to-edit open. Default 0 (the caption). BeginEdit is unaffected --
+' it always names its own column.
+declare function PsListTree_SetEditColumn( byval hListControl as HWND, byval col as integer ) as boolean
+declare function PsListTree_GetEditColumn( byval hListControl as HWND ) as integer
+' ENTER starts an edit on the focused row, default OFF. It is opt-in and separate from
+' EnableLabelEdit because claiming ENTER is not free: the control has to answer WM_GETDLGCODE
+' with DLGC_WANTALLKEYS for that one message (or IsDialogMessage hands it to the host's default
+' button first) and then swallow the WM_CHAR TranslateMessage manufactures, or the system beeps
+' on every press. A host whose ENTER means something else must leave this off.
+declare function PsListTree_SetEnterEdits( byval hListControl as HWND, byval enable as boolean = true ) as boolean
+' Probe: is a WM_CHAR swallow armed? The beep an unswallowed char causes has no return value, so
+' this is the only way to assert the suppression rather than listen for it.
+declare function PsListTree_IsCharSwallowArmed( byval hListControl as HWND ) as boolean
 declare function PsListTree_BeginEdit( byval hListControl as HWND, byval row as integer, byval col as integer = 0 ) as boolean
 declare function PsListTree_EndEdit( byval hListControl as HWND, byval bCommit as boolean = true ) as boolean
 declare function PsListTree_IsEditing( byval hListControl as HWND ) as boolean

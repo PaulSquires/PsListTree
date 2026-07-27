@@ -2760,6 +2760,38 @@ function PsListTree_SetClickToEdit( byval hListControl as HWND, byval enable as 
     return true
 end function
 
+function PsListTree_SetEditColumn( byval hListControl as HWND, byval col as integer ) as boolean
+    dim as PSLISTTREE ptr pList = GetListTreePointer(hListControl)
+    if pList = null then return false
+    if col < 0 then col = 0
+    pList->editGestureCol = col
+    return true
+end function
+
+function PsListTree_GetEditColumn( byval hListControl as HWND ) as integer
+    dim as PSLISTTREE ptr pList = GetListTreePointer(hListControl)
+    if pList = null then return 0
+    return pList->editGestureCol
+end function
+
+function PsListTree_SetEnterEdits( byval hListControl as HWND, byval enable as boolean = true ) as boolean
+    dim as PSLISTTREE ptr pList = GetListTreePointer(hListControl)
+    if pList = null then return false
+    pList->bEnterEdits = enable
+    return true
+end function
+
+' PROBE, public on purpose (PsButton_CountRenderedTones' precedent). A key claimed in WM_KEYDOWN
+' has a WM_CHAR manufactured for it, and an unswallowed one reaches DefWindowProc and BEEPS. The
+' beep has no return value -- DefWindowProc answers WM_CHAR with 0 exactly as the swallow does --
+' so nothing about it is observable from outside except this flag. Without it the only detector
+' is a human listening, which is how the same defect shipped in five sibling controls.
+function PsListTree_IsCharSwallowArmed( byval hListControl as HWND ) as boolean
+    dim as PSLISTTREE ptr pList = GetListTreePointer(hListControl)
+    if pList = null then return false
+    return pList->bSwallowNextChar
+end function
+
 function PsListTree_BeginEdit( byval hListControl as HWND, byval row as integer, byval col as integer = 0 ) as boolean
     dim as PSLISTTREE ptr pList = GetListTreePointer(hListControl)
     if pList = null then return false
@@ -2907,6 +2939,23 @@ function PsListTreeSurface_WndProc ( _
             ' Claim the navigation keys. As a system listbox these arrived automatically;
             ' a plain child window has to ask, or IsDialogMessage in the host's pump eats
             ' the arrows for tab-navigation before WM_KEYDOWN is ever sent.
+            '
+            ' ENTER is claimed PER MESSAGE and only when SetEnterEdits is on -- PsToggle's rule.
+            ' Claiming DLGC_WANTALLKEYS unconditionally would swallow Tab and break the host's
+            ' navigation; claiming nothing lets IsDialogMessage route ENTER to the dialog's
+            ' default button before WM_KEYDOWN can ever arrive here.
+            ' Hoisted to one boolean: a 3-way andalso mixing a pointer relational with two
+            ' boolean fields trips fbc warning 38.
+            dim as boolean bWantEnter = false
+            if pList <> 0 then bWantEnter = (pList->bEnterEdits = true) andalso (pList->bLabelEdit = true)
+            if bWantEnter then
+                dim as MSG ptr pMsg = cast(MSG ptr, _lParam)
+                if pMsg then
+                    if (pMsg->message = WM_KEYDOWN) andalso (pMsg->wParam = VK_RETURN) then
+                        return DLGC_WANTARROWS or DLGC_WANTCHARS or DLGC_WANTALLKEYS
+                    end if
+                end if
+            end if
             return DLGC_WANTARROWS or DLGC_WANTCHARS
 
         case WM_SETFOCUS, WM_KILLFOCUS
@@ -2986,8 +3035,20 @@ function PsListTreeSurface_WndProc ( _
                         PsListTree_KeySpace( pList, isCtrl ) : return 0
                     case VK_F2
                         ' Start an in-place edit of the focused row (no-op unless editing is on).
-                        if pList->bLabelEdit then PsListTree_BeginEditInternal( pList, pList->focusRow, 0 )
+                        if pList->bLabelEdit then _
+                            PsListTree_BeginEditInternal( pList, pList->focusRow, pList->editGestureCol )
                         return 0
+                    case VK_RETURN
+                        ' Same as F2, opt-in. ENTER produces a WM_CHAR, so arm the swallow or
+                        ' the system beeps on every press -- the family-wide trap. Armed here
+                        ' rather than by re-reading state, because the state this key changes
+                        ' has already changed by the time its character arrives.
+                        if pList->bEnterEdits andalso pList->bLabelEdit then
+                            pList->bSwallowNextChar = true
+                            PsListTree_BeginEditInternal( pList, pList->focusRow, pList->editGestureCol )
+                            return 0
+                        end if
+                        ' Not ours: fall through so the host's default button still works.
                 end select
             end if
             ' unhandled keys fall through to the default listbox handler
@@ -3201,7 +3262,7 @@ function PsListTreeSurface_WndProc ( _
                     if pList->bClickToEdit andalso pList->bLabelEdit andalso bWasCurrent then
                         if (deferSel = false) andalso pList->IsRowSelectable(modelRow) then bWantEdit = true
                     end if
-                    if bWantEdit then PsListTree_BeginEditInternal( pList, modelRow, 0 )
+                    if bWantEdit then PsListTree_BeginEditInternal( pList, modelRow, pList->editGestureCol )
                 end if
                 if pList->MessageCallback then
                     if pList->MessageCallback( @m ) then return 0
