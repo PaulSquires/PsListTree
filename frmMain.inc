@@ -1365,6 +1365,19 @@ sub frmMain_RunSelfTest()
     PsListTree_SetEditColumn( HWND_FRMEXPLORER2, 0 )
     PsListTree_EnableLabelEdit( HWND_FRMEXPLORER2, false )
 
+    ' ---- 10k. THE CONTAINER FORWARDS FOCUS. Create returns the CONTAINER, which is the only
+    '           handle a host has -- but every key is handled in the surface WndProc, so focus
+    '           parked on the container is focus nowhere: arrows, F2 and ENTER all go missing
+    '           and the focus bar never appears. A host doing the obvious SetFocus on the
+    '           handle it was given landed exactly there. ----
+    SetFocus( GetDesktopWindow() )                       ' park it somewhere else first
+    SetFocus( HWND_FRMEXPLORER2 )                        ' the CONTAINER, as a host would
+    dim as HWND hFocusNow = GetFocus()
+    SelfTest_Check( "SetFocus on the container lands on the surface, not the container", _
+        (hFocusNow = hSurfMv) andalso (hFocusNow <> HWND_FRMEXPLORER2), _
+        "focus=" & hex(cast(integer, hFocusNow)) & " surface=" & hex(cast(integer, hSurfMv)) & _
+        " container=" & hex(cast(integer, HWND_FRMEXPLORER2)) )
+
     ' ---- 11. Border chrome ------------------------------------------------------------
     '  The border is drawn by the CONTAINER and its whole mechanism is that PositionWindows
     '  insets every child by the width. So the assertable claim is not "a frame was painted"

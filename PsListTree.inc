@@ -2185,6 +2185,18 @@ function PsListTree_WndProc( _
         ' every visible row in one pass in PsListTree_OnPaintSurface.
 
 
+    case WM_SETFOCUS
+        ' Hand focus straight down to the surface. The container has no keyboard behaviour of
+        ' its own -- every key is handled in PsListTreeSurface_WndProc -- so focus parked here
+        ' is focus nowhere: the arrows, F2 and ENTER all go missing and the focus bar never
+        ' appears. A host calling SetFocus on the handle Create returned (the obvious thing,
+        ' and the only handle it has) landed exactly there.
+        dim as PSLISTTREE ptr pListF = GetListTreePointer(hwnd)
+        if pListF then
+            dim as HWND hSurf = GetDlgItem( hwnd, pListF->idc_ListTree )
+            if hSurf then SetFocus( hSurf ) : return 0
+        end if
+
     case WM_NOTIFY
         ' The tooltip asks for its text on demand; supply the current hot row's.
         dim as NMHDR ptr pnmh = cast(NMHDR ptr, lParam)
