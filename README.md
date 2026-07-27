@@ -763,6 +763,35 @@ functions under *Callback registration*.
 | `PsListTree_SetFont( h, hFont ) as boolean` | Sets it and repaints. **Borrowed, never owned** — keep it alive and destroy it yourself. Your paint callback may select a different font per row. |
 | `PsListTree_SetHoverTime( h, milliseconds )` | How long the cursor must rest on a row before `WM_MOUSEHOVER` and the tooltip. Default 250. |
 
+### Border
+
+Off by default. Switch it on to give the list the same chrome a `PsTextBox` has, so a list
+and a text field stacked on one settings page read as the same kind of control:
+
+```freebasic
+PsListTree_SetBorderColor( hList, PsTextBox_GetBorderColor( hField ) )
+PsListTree_SetBorderWidth( hList, 1 )
+```
+
+The frame is drawn by the control's outer window, and the row surface, the scrollbar strip
+and the column header band are all inset by the width, so nothing paints over it. Corners are
+square, matching a `PsTextBox` at its default corner radius of 0.
+
+The width is in **raw pixels and is never DPI-scaled** — a chrome hairline should stay a
+hairline at every scale (the same rule `PsTextBox`'s border and `PsMenuBar`'s separator
+follow). Do not pre-scale it.
+
+There is no focus-border colour. A `PsTextBox` switches to one when its editor has the caret;
+a list has no caret to signal.
+
+| Function | Description |
+|---|---|
+| `PsListTree_GetBorderWidth( h ) as integer` | Pixels. 0 (the default) means no border and no reserved space. |
+| `PsListTree_SetBorderWidth( h, nWidth )` | Sets it, re-lays out the children and repaints. Negative clamps to 0. Raw pixels — not DPI-scaled. |
+| `PsListTree_GetBorderColor( h ) as COLORREF` | Default `BGR(122,122,122)`, the same default `PsTextBox` uses. |
+| `PsListTree_SetBorderColor( h, clr )` | Sets it and repaints. |
+| `PsListTree_ProbeRenderedPixel( h, x, y ) as long` | Renders the outer window offscreen through the same code its `WM_PAINT` runs and returns the colour at one client point as a `COLORREF`, or `-1` if the point is outside the client. For asserting that a themed border actually reached the pixels rather than merely that the setter stored it. Renders the outer window only — the rows live on a child surface and are not in that image. |
+
 ### Tree appearance
 
 All OFF / zero-effect by default, so a flat or grouped list is untouched. Widths are **unscaled**
@@ -878,6 +907,7 @@ What the control itself owns:
 | `PsListTree_SetScrollBarColors` — `foreclr` | The scrollbar thumb, idle |
 | `PsListTree_SetScrollBarColors` — `foreclrhot` | The scrollbar thumb, cursor over it or dragging |
 | `PsListTree_SetHeaderBackColor` | The header band's flat background, behind the column cells |
+| `PsListTree_SetBorderColor` | The frame around the whole control, when `SetBorderWidth` is non-zero |
 
 ### Which colour wins
 

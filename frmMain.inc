@@ -453,6 +453,20 @@ function SelfTest_RejectEnd( byval hCtl as HWND, byval row as integer, byval new
     return false
 end function
 
+' A child window's rect expressed in its PARENT's client coordinates. The border tests are
+' entirely about where the container puts its children, and that is the coordinate space the
+' question lives in -- GetClientRect on the child would answer 0,0,w,h and say nothing.
+function SelfTest_ChildRectInParent( byval hChild as HWND, byval hParent as HWND ) as RECT
+    dim as RECT rc
+    GetWindowRect( hChild, @rc )
+    MapWindowPoints( HWND_DESKTOP, hParent, cast(LPPOINT, @rc), 2 )
+    return rc
+end function
+
+function SelfTest_RectStr( byref rc as RECT ) as string
+    return "[" & str(rc.left) & "," & str(rc.top) & ".." & str(rc.right) & "," & str(rc.bottom) & "]"
+end function
+
 sub SelfTest_Check( byval sName as string, byval bOK as boolean, byval sDetail as string )
     dim as string s
     if bOK then
@@ -1127,6 +1141,141 @@ sub frmMain_RunSelfTest()
         okEscClaimed andalso okEscKept andalso okEscEnded, _
         "claimed=" & str(okEscClaimed) & " text=" & sEscNow )
 
+    ' ---- 11. Border chrome ------------------------------------------------------------
+    '  The border is drawn by the CONTAINER and its whole mechanism is that PositionWindows
+    '  insets every child by the width. So the assertable claim is not "a frame was painted"
+    '  but "a band of exactly nBorderWidth pixels around the container's client is covered by
+    '  no child" -- if that band is clear, the container's own WM_PAINT owns it; if it is not,
+    '  a child paints over the frame and no amount of drawing code helps.
+    '
+    '  Every rect below is read back from the LIVE windows, never re-derived from the formula
+    '  under test.
+    dim as HWND hBd     = HWND_FRMEXPLORER            ' long list -> scrollbar is shown
+    dim as HWND hBdSurf = GetDlgItem( hBd, IDC_FRMMAIN_LISTBOX )
+    dim as HWND hBdSB   = PsListTree_GetScrollBar( hBd )
+    dim as RECT rcBdCli : GetClientRect( hBd, @rcBdCli )
+
+    ' 11a. OFF by default -- the claim that every pre-existing host is untouched.
+    SelfTest_Check( "border defaults to 0 (no chrome, no reserved space)", _
+        PsListTree_GetBorderWidth( hBd ) = 0, "w=" & str(PsListTree_GetBorderWidth(hBd)) )
+
+    dim as RECT rcSurf0 = SelfTest_ChildRectInParent( hBdSurf, hBd )
+    dim as RECT rcSB0   = SelfTest_ChildRectInParent( hBdSB, hBd )
+    dim as boolean bSBShown = (IsWindowVisible( hBdSB ) <> 0)
+    SelfTest_Check( "precondition: this instance's scrollbar IS shown", bSBShown, _
+        "sb=" & SelfTest_RectStr( rcSB0 ) )
+    ' At width 0 the children reach all four edges: surface at the origin, and between the
+    ' surface and the scrollbar the full client width and height is consumed.
+    SelfTest_Check( "width 0: children reach every edge of the client", _
+        (rcSurf0.left = 0) andalso (rcSurf0.top = 0) andalso _
+        (rcSurf0.bottom = rcBdCli.bottom) andalso (rcSB0.right = rcBdCli.right), _
+        "cli=" & SelfTest_RectStr( rcBdCli ) & " surf=" & SelfTest_RectStr( rcSurf0 ) )
+
+    ' 11b. Width 1 -- the value tiko uses to match a PsTextBox. Assert the CLEAR BAND on all
+    '      four sides, taking the outermost edge any child reaches.
+    #macro BORDERBAND( bw, tag )
+        scope
+            PsListTree_SetBorderWidth( hBd, (bw) )
+            dim as RECT rs = SelfTest_ChildRectInParent( hBdSurf, hBd )
+            dim as RECT rb = SelfTest_ChildRectInParent( hBdSB, hBd )
+            dim as long lMin = iif( rs.left   < rb.left,   rs.left,   rb.left )
+            dim as long tMin = iif( rs.top    < rb.top,    rs.top,    rb.top )
+            dim as long rMax = iif( rs.right  > rb.right,  rs.right,  rb.right )
+            dim as long bMax = iif( rs.bottom > rb.bottom, rs.bottom, rb.bottom )
+            SelfTest_Check( "width " & (tag) & ": clear band of " & (tag) & "px on all four sides", _
+                (lMin = (bw)) andalso (tMin = (bw)) andalso _
+                (rMax = rcBdCli.right - (bw)) andalso (bMax = rcBdCli.bottom - (bw)), _
+                "band l=" & str(lMin) & " t=" & str(tMin) & _
+                " r=" & str(rcBdCli.right - rMax) & " b=" & str(rcBdCli.bottom - bMax) )
+        end scope
+    #endmacro
+    BORDERBAND( 1, "1" )
+
+    ' 11c. Width 3, so nothing above can be passing on a hardcoded 1 -- and so the "raw
+    '      pixels, never DPI-scaled" contract is actually exercised. That claim is only
+    '      DISCRIMINATING above 100% DPI, where ScaleX(3) <> 3; the detail reports the scaled
+    '      value so a reader can see whether this run could tell the difference.
+    dim as CWindow ptr pBdWin = AfxCWindowPtr( hBd )
+    dim as long nScaled3 = 3
+    if pBdWin then nScaled3 = pBdWin->ScaleX( 3 )
+    BORDERBAND( 3, "3" )
+    SelfTest_Check( "border width is RAW pixels, not DPI-scaled", _
+        SelfTest_ChildRectInParent( hBdSurf, hBd ).left = 3, _
+        "inset=" & str( SelfTest_ChildRectInParent( hBdSurf, hBd ).left ) & _
+        " ScaleX(3)=" & str(nScaled3) & _
+        iif( nScaled3 = 3, "  (100% DPI -- NOT discriminating)", "  (discriminating)" ) )
+
+    ' 11d. A negative width is clamped, not honoured (it would inset the children outward).
+    PsListTree_SetBorderWidth( hBd, -5 )
+    SelfTest_Check( "negative width clamps to 0", PsListTree_GetBorderWidth( hBd ) = 0, _
+        "w=" & str(PsListTree_GetBorderWidth(hBd)) )
+
+    ' 11e. Round trip: back at 0 the geometry must be EXACTLY what it was before any of this,
+    '      which is what makes the feature safe to leave switched off in every other host.
+    dim as RECT rcSurfZ = SelfTest_ChildRectInParent( hBdSurf, hBd )
+    dim as RECT rcSBZ   = SelfTest_ChildRectInParent( hBdSB, hBd )
+    SelfTest_Check( "0 -> 3 -> 0 restores the original child geometry exactly", _
+        (rcSurfZ.left = rcSurf0.left) andalso (rcSurfZ.top = rcSurf0.top) andalso _
+        (rcSurfZ.right = rcSurf0.right) andalso (rcSurfZ.bottom = rcSurf0.bottom) andalso _
+        (rcSBZ.right = rcSB0.right) andalso (rcSBZ.left = rcSB0.left), _
+        "surf " & SelfTest_RectStr( rcSurf0 ) & " -> " & SelfTest_RectStr( rcSurfZ ) )
+
+    ' 11f. Colour round-trips (it is the half of the contract the geometry cannot see).
+    dim as COLORREF clrWas = PsListTree_GetBorderColor( hBd )
+    PsListTree_SetBorderColor( hBd, &h00123456 )
+    SelfTest_Check( "border colour round-trips", _
+        PsListTree_GetBorderColor( hBd ) = &h00123456, _
+        "got=&h" & hex( PsListTree_GetBorderColor( hBd ) ) )
+    PsListTree_SetBorderColor( hBd, clrWas )
+
+    ' 11f-2. INK. Everything above proves the band is RESERVED; none of it would notice the
+    '        frame never being drawn into it. Drive the container's real render offscreen and
+    '        read the pixels: one inside the band, one just inside it. Distinct, deliberately
+    '        unlikely colours, so nothing can pass by coinciding with the theme.
+    const as COLORREF CLR_AB_BORDER = &h00204080
+    const as COLORREF CLR_AB_BACK   = &h00E0C0A0
+    dim as COLORREF clrBackWas = PsListTree_GetBackColor( hBd )
+    PsListTree_SetBorderColor( hBd, CLR_AB_BORDER )
+    PsListTree_SetBackColor( hBd, CLR_AB_BACK )
+    PsListTree_SetBorderWidth( hBd, 4 )              ' >1, so a point can sit strictly inside the band
+    dim as long pxTop   = PsListTree_ProbeRenderedPixel( hBd, rcBdCli.right \ 2, 1 )
+    dim as long pxLeft  = PsListTree_ProbeRenderedPixel( hBd, 1, rcBdCli.bottom \ 2 )
+    dim as long pxRight = PsListTree_ProbeRenderedPixel( hBd, rcBdCli.right - 2, rcBdCli.bottom \ 2 )
+    dim as long pxBot   = PsListTree_ProbeRenderedPixel( hBd, rcBdCli.right \ 2, rcBdCli.bottom - 2 )
+    dim as long pxIn    = PsListTree_ProbeRenderedPixel( hBd, rcBdCli.right \ 2, rcBdCli.bottom \ 2 )
+    SelfTest_Check( "border INK: all four sides render the border colour", _
+        (pxTop = CLR_AB_BORDER) andalso (pxLeft = CLR_AB_BORDER) andalso _
+        (pxRight = CLR_AB_BORDER) andalso (pxBot = CLR_AB_BORDER), _
+        "want=&h" & hex(CLR_AB_BORDER) & " t=&h" & hex(pxTop) & " l=&h" & hex(pxLeft) & _
+        " r=&h" & hex(pxRight) & " b=&h" & hex(pxBot) )
+    ' The complement: the frame must NOT have flooded the interior. This is the assertion the
+    ' family's four PaintBorderRect accidents would have failed.
+    SelfTest_Check( "border INK: the interior is NOT flooded with the border colour", _
+        (pxIn = CLR_AB_BACK), _
+        "want=&h" & hex(CLR_AB_BACK) & " got=&h" & hex(pxIn) )
+    ' And with the border off, the same points must all be plain background -- so the two
+    ' assertions above cannot be passing on something that is there whatever the width says.
+    PsListTree_SetBorderWidth( hBd, 0 )
+    dim as long pxOffT = PsListTree_ProbeRenderedPixel( hBd, rcBdCli.right \ 2, 1 )
+    dim as long pxOffL = PsListTree_ProbeRenderedPixel( hBd, 1, rcBdCli.bottom \ 2 )
+    SelfTest_Check( "border INK: width 0 leaves no frame at all", _
+        (pxOffT = CLR_AB_BACK) andalso (pxOffL = CLR_AB_BACK), _
+        "t=&h" & hex(pxOffT) & " l=&h" & hex(pxOffL) )
+    PsListTree_SetBackColor( hBd, clrBackWas )
+
+    ' 11g. The HEADER band is inset too. It is the one child that spans the full container
+    '      width (over the scrollbar strip, listview-style), so it is the child most likely to
+    '      be left painting across the frame -- assert it on the instance that actually has one.
+    dim as HWND hBdH = HWND_FRMEXPLORER2
+    dim as RECT rcBdHCli : GetClientRect( hBdH, @rcBdHCli )
+    dim as RECT rcHdr0 = SelfTest_ChildRectInParent( HWND_COLHDR, hBdH )
+    PsListTree_SetBorderWidth( hBdH, 2 )
+    dim as RECT rcHdr2 = SelfTest_ChildRectInParent( HWND_COLHDR, hBdH )
+    SelfTest_Check( "header band is inset by the border on left/top/right", _
+        (rcHdr2.left = 2) andalso (rcHdr2.top = 2) andalso (rcHdr2.right = rcBdHCli.right - 2), _
+        "0px=" & SelfTest_RectStr( rcHdr0 ) & " 2px=" & SelfTest_RectStr( rcHdr2 ) )
+    PsListTree_SetBorderWidth( hBdH, 0 )
+
     print "=== self-test complete: " & str(gFailCount) & " failure(s) ==="
 end sub
 
@@ -1357,6 +1506,10 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
     PsListTree_SetScrollBarColors( HWND_FRMEXPLORER3, theme.BackColorScrollBar, _
                                  theme.ForeColorScrollBar, theme.ForeColorScrollBarHot )
     PsListTree_SetExtendedSelect( HWND_FRMEXPLORER3, true )
+    ' The optional border, on this instance only, so the other two still show the default
+    ' borderless look side by side with it. Raw pixels -- do NOT wrap this in ScaleX.
+    PsListTree_SetBorderColor( HWND_FRMEXPLORER3, theme.ForeColorScrollBar )
+    PsListTree_SetBorderWidth( HWND_FRMEXPLORER3, 1 )
     ' Tree visuals: per-depth indent + control-drawn chevrons in the icon font.
     PsListTree_SetTreeIndent( HWND_FRMEXPLORER3, true )
     PsListTree_ShowTwisty( HWND_FRMEXPLORER3, true )
