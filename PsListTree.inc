@@ -2667,6 +2667,17 @@ function PsListTree_BeginEditInternal( byval pList as PSLISTTREE ptr, byval row 
         PsTextBox_SetFocusCallback( pList->hEdit, @PsListTree_EditFocusChanged )
         PsTextBox_SetMessageCallback( pList->hEdit, @PsListTree_EditMessage )
         PsTextBox_SetBorderWidth( pList->hEdit, 1 )
+        ' Applied on CREATE, which is the only moment a host cannot reach: SetEditColors stores
+        ' them precisely because the editor does not exist until here.
+        if pList->bEditColorsSet then
+            PsTextBox_SetBackColor( pList->hEdit, pList->clrEditBack )
+            PsTextBox_SetForeColor( pList->hEdit, pList->clrEditFore )
+            PsTextBox_SetBorderColor( pList->hEdit, pList->clrEditBorder )
+            PsTextBox_SetFocusBorderColor( pList->hEdit, pList->clrEditFocusBdr )
+            ' The strip around the bordered box, so the editor sits on the row rather than on a
+            ' pale rectangle the size of the cell.
+            PsTextBox_SetOuterBackColor( pList->hEdit, pList->clrEditBack )
+        end if
     end if
     if pList->hRowFont then PsTextBox_SetFont( pList->hEdit, pList->hRowFont )
 
@@ -2702,15 +2713,23 @@ function PsListTree_BeginEditInternal( byval pList as PSLISTTREE ptr, byval row 
     if xRight < xLeft + 8 then xRight = xLeft + 8
     SetWindowPos( pList->hEdit, HWND_TOP, xLeft, rcRow.top, xRight - xLeft, rcRow.bottom - rcRow.top, SWP_SHOWWINDOW )
 
-    ' Seed with the current caption and select all, ready to overtype.
+    ' Seed with the cell's current text.
     dim as PSLISTTREE_ROWINFO ptr pRow = pList->GetRow( row )
     dim as DWSTRING wszCur = ""
     if pRow then
         if col = 0 then wszCur = pRow->Text else wszCur = PsListTree_GetCellText( pList->hWin, row, col )
     end if
     PsTextBox_SetText( pList->hEdit, wszCur )
+
+    ' Focus FIRST, then place the selection -- the caret belongs to the focused window, and a
+    ' selection set before focus arrives is not what the user sees afterwards.
     SetFocus( PsTextBox_GetRichEditHandle( pList->hEdit ) )
-    PsTextBox_SelectAll( pList->hEdit )
+    if pList->bEditSelectAll then
+        PsTextBox_SelectAll( pList->hEdit )          ' ready to overtype (explorer rename)
+    else
+        dim as integer nLen = len( wszCur )
+        PsTextBox_SetSel( pList->hEdit, nLen, nLen ) ' caret at the end, nothing selected
+    end if
     return true
 end function
 
@@ -2808,6 +2827,33 @@ function PsListTree_SetEnterEdits( byval hListControl as HWND, byval enable as b
     pList->bEnterEdits = enable
     return true
 end function
+
+sub PsListTree_SetEditColors( byval hListControl as HWND, byval clrBack as COLORREF, _
+                              byval clrFore as COLORREF, byval clrBorder as COLORREF, _
+                              byval clrFocusBorder as COLORREF )
+    dim as PSLISTTREE ptr pList = GetListTreePointer(hListControl)
+    if pList = null then return
+    pList->clrEditBack     = clrBack
+    pList->clrEditFore     = clrFore
+    pList->clrEditBorder   = clrBorder
+    pList->clrEditFocusBdr = clrFocusBorder
+    pList->bEditColorsSet  = true
+    ' An editor already created (this control keeps it for the instance's life) is re-coloured
+    ' now, so a theme change part-way through a session is not one edit behind.
+    if pList->hEdit then
+        PsTextBox_SetBackColor( pList->hEdit, clrBack )
+        PsTextBox_SetForeColor( pList->hEdit, clrFore )
+        PsTextBox_SetBorderColor( pList->hEdit, clrBorder )
+        PsTextBox_SetFocusBorderColor( pList->hEdit, clrFocusBorder )
+        PsTextBox_SetOuterBackColor( pList->hEdit, clrBack )
+    end if
+end sub
+
+sub PsListTree_SetEditSelectAll( byval hListControl as HWND, byval enable as boolean )
+    dim as PSLISTTREE ptr pList = GetListTreePointer(hListControl)
+    if pList = null then return
+    pList->bEditSelectAll = enable
+end sub
 
 ' PROBE, public on purpose (PsButton_CountRenderedTones' precedent). A key claimed in WM_KEYDOWN
 ' has a WM_CHAR manufactured for it, and an unswallowed one reaches DefWindowProc and BEEPS. The

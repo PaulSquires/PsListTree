@@ -1378,6 +1378,43 @@ sub frmMain_RunSelfTest()
         "focus=" & hex(cast(integer, hFocusNow)) & " surface=" & hex(cast(integer, hSurfMv)) & _
         " container=" & hex(cast(integer, HWND_FRMEXPLORER2)) )
 
+    ' ---- 10l. THE EDITOR'S COLOURS AND ITS CARET. The editor is created LAZILY INSIDE the
+    '           control, so a host has no handle to theme and no moment to do it in -- the
+    '           BeginLabelEdit veto runs before the create. Un-themed it renders in PsTextBox's
+    '           defaults, black on white, inside whatever the list looks like. ----
+    PsListTree_EnableLabelEdit( HWND_FRMEXPLORER2, true )
+    PsListTree_SetEditColors( HWND_FRMEXPLORER2, &hFF2010, &h10FF20, &h2010FF, &hFFFFFF )
+    PsListTree_SetCellText( HWND_FRMEXPLORER2, 0, 2, "abcdef" )
+    PsListTree_BeginEdit( HWND_FRMEXPLORER2, 0, 2 )
+    dim as HWND hEdThm = GetDlgItem( hSurfMv, IDC_FRMMAIN_LISTBOX + 3 )
+    dim as COLORREF cBack = PsTextBox_GetBackColor( hEdThm )
+    dim as COLORREF cFore = PsTextBox_GetForeColor( hEdThm )
+    SelfTest_Check( "SetEditColors reaches the lazily-created editor", _
+        (cBack = &hFF2010) andalso (cFore = &h10FF20), _
+        "back=&h" & hex(cBack) & " fore=&h" & hex(cFore) )
+
+    ' Caret at the END, nothing selected -- the whole point of SetEditSelectAll(false), and the
+    ' selection is read back off the REAL RichEdit rather than from a flag we just set.
+    dim as integer selS, selE
+    PsListTree_EndEdit( HWND_FRMEXPLORER2, false )
+    PsListTree_SetEditSelectAll( HWND_FRMEXPLORER2, false )
+    PsListTree_BeginEdit( HWND_FRMEXPLORER2, 0, 2 )
+    dim as HWND hEdCaret = GetDlgItem( hSurfMv, IDC_FRMMAIN_LISTBOX + 3 )
+    SendMessageW( PsTextBox_GetRichEditHandle(hEdCaret), EM_GETSEL, cast(WPARAM,@selS), cast(LPARAM,@selE) )
+    SelfTest_Check( "SetEditSelectAll(false) leaves the caret at the end, nothing selected", _
+        (selS = 6) andalso (selE = 6), "sel=" & str(selS) & ".." & str(selE) & " len=6" )
+    PsListTree_EndEdit( HWND_FRMEXPLORER2, false )
+
+    ' ...and TRUE (the default) still selects the lot, so the change is opt-in.
+    PsListTree_SetEditSelectAll( HWND_FRMEXPLORER2, true )
+    PsListTree_BeginEdit( HWND_FRMEXPLORER2, 0, 2 )
+    dim as HWND hEdSel = GetDlgItem( hSurfMv, IDC_FRMMAIN_LISTBOX + 3 )
+    SendMessageW( PsTextBox_GetRichEditHandle(hEdSel), EM_GETSEL, cast(WPARAM,@selS), cast(LPARAM,@selE) )
+    SelfTest_Check( "SetEditSelectAll(true) still selects the whole text", _
+        (selS = 0) andalso (selE = 6), "sel=" & str(selS) & ".." & str(selE) )
+    PsListTree_EndEdit( HWND_FRMEXPLORER2, false )
+    PsListTree_EnableLabelEdit( HWND_FRMEXPLORER2, false )
+
     ' ---- 11. Border chrome ------------------------------------------------------------
     '  The border is drawn by the CONTAINER and its whole mechanism is that PositionWindows
     '  insets every child by the width. So the assertable claim is not "a frame was painted"

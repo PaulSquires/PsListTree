@@ -323,6 +323,19 @@ type PSLISTTREE
     ' NOT constrain PsListTree_BeginEdit, which always takes its column explicitly.
     editGestureCol  as integer = 0
     bEnterEdits     as boolean = false    ' ENTER starts an edit (see SetEnterEdits; default OFF)
+    ' The editor is created lazily INSIDE this control, so a host has no handle to theme and no
+    ' moment to do it in -- the BeginLabelEdit veto runs before the create. These are stored and
+    ' applied to the PsTextBox as soon as it exists. Unset (bEditColorsSet false) leaves
+    ' PsTextBox's own defaults, which are black on white.
+    bEditColorsSet  as boolean = false
+    clrEditBack     as COLORREF = 0
+    clrEditFore     as COLORREF = 0
+    clrEditBorder   as COLORREF = 0
+    clrEditFocusBdr as COLORREF = 0
+    ' TRUE (the default) selects the whole text so the first keystroke replaces it -- explorer
+    ' rename behaviour. FALSE puts the caret at the END instead, for a host whose edits are
+    ' usually amendments rather than replacements.
+    bEditSelectAll  as boolean = true
     bEditTearingDown as boolean = false   ' guards the re-entrant commit that DestroyWindow's focus loss triggers
     BeginLabelEditCallback as BeginLabelEditCallbackFunc  ' optional pre-edit veto
     EndLabelEditCallback   as EndLabelEditCallbackFunc    ' optional commit accept/reject
@@ -1019,6 +1032,15 @@ declare function PsListTree_GetEditColumn( byval hListControl as HWND ) as integ
 ' button first) and then swallow the WM_CHAR TranslateMessage manufactures, or the system beeps
 ' on every press. A host whose ENTER means something else must leave this off.
 declare function PsListTree_SetEnterEdits( byval hListControl as HWND, byval enable as boolean = true ) as boolean
+' Theme the in-place editor. The control creates it lazily and owns it, so a host cannot reach
+' the PsTextBox to colour it -- without this it renders in PsTextBox's defaults, black on white,
+' whatever the list around it looks like.
+declare sub      PsListTree_SetEditColors( byval hListControl as HWND, byval clrBack as COLORREF, _
+                                           byval clrFore as COLORREF, byval clrBorder as COLORREF, _
+                                           byval clrFocusBorder as COLORREF )
+' TRUE (default) selects the text so the first keystroke replaces it; FALSE leaves the caret at
+' the end of it.
+declare sub      PsListTree_SetEditSelectAll( byval hListControl as HWND, byval enable as boolean )
 ' Probe: is a WM_CHAR swallow armed? The beep an unswallowed char causes has no return value, so
 ' this is the only way to assert the suppression rather than listen for it.
 declare function PsListTree_IsCharSwallowArmed( byval hListControl as HWND ) as boolean
