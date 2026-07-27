@@ -1382,6 +1382,17 @@ function PsListTree_GetColumnWidth( byval hListControl as HWND, byval idx as int
     return PsColumnHeader_GetColumnWidth( pList->hHeader, idx )
 end function
 
+' The header lays the columns out; the surface paints its cells at the same x. Handing the rect
+' out lets a host answer "which column did that click land in" without re-deriving the layout
+' from the widths (which would have to reproduce the fill column's stretch). Same forwarding
+' rationale as GetColumnWidth above -- PsListTree_GetHeader would also get a caller there.
+function PsListTree_GetColumnRect( byval hListControl as HWND, byval idx as integer, byref rc as RECT ) as boolean
+    SetRectEmpty( @rc )
+    dim as PSLISTTREE ptr pList = GetListTreePointer(hListControl)
+    if pList = null then return false
+    return PsColumnHeader_GetColumnRect( pList->hHeader, idx, rc )
+end function
+
 function PsListTree_SetColumnWidth( byval hListControl as HWND, byval idx as integer, byval nWidth as integer ) as boolean
     dim as PSLISTTREE ptr pList = GetListTreePointer(hListControl)
     if pList = null then return false
@@ -2634,20 +2645,31 @@ function PsListTree_BeginEditInternal( byval pList as PSLISTTREE ptr, byval row 
     pList->editRow = row
     pList->editCol = col
 
-    ' Place over the caption: row rect (surface client coords), left past the tree indent and
-    ' the twisty band, right to column 0's edge (columns mode) or the client right.
+    ' Place over the cell being edited. The row rect is in surface client coords and the header's
+    ' column rects share that x origin, so a column rect can be used directly.
     dim as RECT rcRow
     if PsListTree_VisIndexRect( pList, vis, rcRow ) = false then
         PsListTree_EndEditInternal( pList, false )
         return false
     end if
-    dim as integer xLeft = rcRow.left + PsListTree_RowLevelIndentPx( pList, row )
-    if pList->bShowTwisty then xLeft += PsListTree_TwistyPx( pList )
-    dim as integer xRight = rcRow.right
     dim as integer nCols = PsColumnHeader_GetCount( pList->hHeader )
-    if nCols > 0 then
-        dim as RECT rcCol0 : PsColumnHeader_GetColumnRect( pList->hHeader, 0, rcCol0 )
-        xRight = rcCol0.right
+    dim as integer xLeft, xRight
+    if (col > 0) andalso (col < nCols) then
+        ' A cell in column N. No indent or twisty inset -- those belong to the caption column
+        ' only, which is where the tree structure is drawn.
+        dim as RECT rcCol : PsColumnHeader_GetColumnRect( pList->hHeader, col, rcCol )
+        xLeft  = rcCol.left
+        xRight = rcCol.right
+    else
+        ' The caption: left past the tree indent and the twisty band, right to column 0's edge
+        ' (columns mode) or the client right.
+        xLeft = rcRow.left + PsListTree_RowLevelIndentPx( pList, row )
+        if pList->bShowTwisty then xLeft += PsListTree_TwistyPx( pList )
+        xRight = rcRow.right
+        if nCols > 0 then
+            dim as RECT rcCol0 : PsColumnHeader_GetColumnRect( pList->hHeader, 0, rcCol0 )
+            xRight = rcCol0.right
+        end if
     end if
     if xRight < xLeft + 8 then xRight = xLeft + 8
     SetWindowPos( pList->hEdit, HWND_TOP, xLeft, rcRow.top, xRight - xLeft, rcRow.bottom - rcRow.top, SWP_SHOWWINDOW )
@@ -2760,6 +2782,20 @@ function PsListTree_GetEditRow( byval hListControl as HWND ) as integer
     dim as PSLISTTREE ptr pList = GetListTreePointer(hListControl)
     if pList = null then return -1
     return pList->editRow
+end function
+
+' Which column the edit is on. The EndLabelEdit callback is not handed the column, so a host that
+' wants only ONE column editable reads it here and returns FALSE for the others -- F2 always opens
+' column 0, whatever column the host's own gesture opened last.
+'
+' Unlike GetEditRow this does NOT reset to -1 when the edit ends, and that is deliberate:
+' EndEditInternal tears the editor down BEFORE it calls EndLabelEdit, so a value cleared on
+' teardown would be unreadable at the one moment it is wanted. Outside an edit it reports the
+' column of the last one.
+function PsListTree_GetEditCol( byval hListControl as HWND ) as integer
+    dim as PSLISTTREE ptr pList = GetListTreePointer(hListControl)
+    if pList = null then return -1
+    return pList->editCol
 end function
 
 ' Host pump obligation when label editing is enabled: forwards to the editor's PsTextBox so
