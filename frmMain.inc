@@ -1141,6 +1141,84 @@ sub frmMain_RunSelfTest()
         okEscClaimed andalso okEscKept andalso okEscEnded, _
         "claimed=" & str(okEscClaimed) & " text=" & sEscNow )
 
+    ' ---- 10h. EDITING A COLUMN OTHER THAN 0. BeginEdit has always taken a column and has
+    '           always seeded and committed the right cell; what it did NOT do was PLACE the
+    '           editor anywhere but over column 0, so an edit of column 2 opened a box over
+    '           column 0's text. These read the editor's real window rect back and compare it
+    '           against the header's real column rect -- neither side is re-derived from the
+    '           placement formula.
+    '
+    '           Instance B is the multi-column one, so it is the only instance that can answer
+    '           this; it does not enable label editing in the demo, so the test turns it on for
+    '           the duration and puts it back. ----
+    dim as HWND hSurfMv = GetDlgItem( HWND_FRMEXPLORER2, IDC_FRMMAIN_LISTBOX )
+    PsListTree_EnableLabelEdit( HWND_FRMEXPLORER2, true )
+
+    ' Precondition: the three columns are laid out and column 2 does NOT start where column 0
+    ' does. Without this the placement assertion below would pass on the unfixed control.
+    dim as RECT rcCol0Mv, rcCol2Mv
+    dim as boolean okRect0 = PsListTree_GetColumnRect( HWND_FRMEXPLORER2, 0, rcCol0Mv )
+    dim as boolean okRect2 = PsListTree_GetColumnRect( HWND_FRMEXPLORER2, 2, rcCol2Mv )
+    dim as boolean okColsApart = (rcCol2Mv.left > rcCol0Mv.left)
+    SelfTest_Check( "GetColumnRect: cols 0 and 2 are laid out and separated", _
+        okRect0 andalso okRect2 andalso okColsApart, _
+        "c0=" & SelfTest_RectStr(rcCol0Mv) & " c2=" & SelfTest_RectStr(rcCol2Mv) )
+
+    ' It agrees with the header's own answer -- the forward is a forward, not a second formula.
+    dim as RECT rcCol2Hdr
+    PsColumnHeader_GetColumnRect( PsListTree_GetHeader(HWND_FRMEXPLORER2), 2, rcCol2Hdr )
+    SelfTest_Check( "GetColumnRect = PsColumnHeader_GetColumnRect on the same column", _
+        (rcCol2Mv.left = rcCol2Hdr.left) andalso (rcCol2Mv.right = rcCol2Hdr.right), _
+        "fwd=" & SelfTest_RectStr(rcCol2Mv) & " hdr=" & SelfTest_RectStr(rcCol2Hdr) )
+
+    ' THE FIX ITSELF: the editor lands on column 2, not column 0.
+    PsListTree_SetCellText( HWND_FRMEXPLORER2, 0, 2, "cell2_before" )
+    dim as boolean okBeginC2 = PsListTree_BeginEdit( HWND_FRMEXPLORER2, 0, 2 )
+    dim as HWND hEditMv = GetDlgItem( hSurfMv, IDC_FRMMAIN_LISTBOX + 3 )
+    dim as RECT rcEditMv = SelfTest_ChildRectInParent( hEditMv, hSurfMv )
+    SelfTest_Check( "BeginEdit(col 2) places the editor ON column 2", _
+        okBeginC2 andalso (rcEditMv.left = rcCol2Mv.left) andalso (rcEditMv.right = rcCol2Mv.right), _
+        "edit=" & SelfTest_RectStr(rcEditMv) & " col2=" & SelfTest_RectStr(rcCol2Mv) )
+
+    ' GetEditCol reports it while the edit is live...
+    SelfTest_Check( "GetEditCol reports the column being edited", _
+        (PsListTree_GetEditCol(HWND_FRMEXPLORER2) = 2), _
+        "col=" & str(PsListTree_GetEditCol(HWND_FRMEXPLORER2)) )
+
+    ' ...the editor was seeded from that CELL, not from the row caption...
+    dim as string sSeed = PsTextBox_GetText( hEditMv )
+    SelfTest_Check( "the editor is seeded from the column's own cell", _
+        (sSeed = "cell2_before"), "seed=" & sSeed )
+
+    ' ...and the commit writes the cell while leaving the caption alone.
+    dim as string sCap0Before = PsListTree_GetText( HWND_FRMEXPLORER2, 0 )
+    PsTextBox_SetText( hEditMv, "cell2_after" )
+    PsListTree_EndEdit( HWND_FRMEXPLORER2, true )
+    dim as boolean okCellWrote = (PsListTree_GetCellText(HWND_FRMEXPLORER2,0,2) = "cell2_after")
+    dim as boolean okCapIntact = (PsListTree_GetText(HWND_FRMEXPLORER2,0) = sCap0Before)
+    SelfTest_Check( "commit writes cell 2 and leaves the caption untouched", _
+        okCellWrote andalso okCapIntact, _
+        "cell=" & PsListTree_GetCellText(HWND_FRMEXPLORER2,0,2) & " cap=" & PsListTree_GetText(HWND_FRMEXPLORER2,0) )
+
+    ' GetEditCol survives the teardown, which is the whole reason it is readable at all: the
+    ' editor is destroyed BEFORE EndLabelEdit runs, so a host filtering on the column inside
+    ' that callback would get -1 from a value cleared on teardown.
+    SelfTest_Check( "GetEditCol still reports the column AFTER the edit ended", _
+        (PsListTree_GetEditCol(HWND_FRMEXPLORER2) = 2), _
+        "col=" & str(PsListTree_GetEditCol(HWND_FRMEXPLORER2)) )
+
+    ' The column-0 path is unchanged: still inset past the indent/twisty band, so its left edge
+    ' is NOT simply column 0's left. Asserted because the fix restructured that branch.
+    PsListTree_BeginEdit( HWND_FRMEXPLORER2, 0, 0 )
+    dim as HWND hEditMv0 = GetDlgItem( hSurfMv, IDC_FRMMAIN_LISTBOX + 3 )
+    dim as RECT rcEditMv0 = SelfTest_ChildRectInParent( hEditMv0, hSurfMv )
+    SelfTest_Check( "BeginEdit(col 0) still ends at column 0's right edge", _
+        (rcEditMv0.right = rcCol0Mv.right), _
+        "edit=" & SelfTest_RectStr(rcEditMv0) & " col0=" & SelfTest_RectStr(rcCol0Mv) )
+    PsListTree_EndEdit( HWND_FRMEXPLORER2, false )
+
+    PsListTree_EnableLabelEdit( HWND_FRMEXPLORER2, false )
+
     ' ---- 11. Border chrome ------------------------------------------------------------
     '  The border is drawn by the CONTAINER and its whole mechanism is that PositionWindows
     '  insets every child by the width. So the assertable claim is not "a frame was painted"
