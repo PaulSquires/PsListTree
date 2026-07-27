@@ -336,6 +336,11 @@ type PSLISTTREE
     ' rename behaviour. FALSE puts the caret at the END instead, for a host whose edits are
     ' usually amendments rather than replacements.
     bEditSelectAll  as boolean = true
+    ' Where the editor's TEXT should start, in pixels from the edited cell's left edge. The host
+    ' paints its cell text at some inset of its own choosing (the control never sees it, since
+    ' the paint callback owns that), and an editor whose text starts anywhere else makes the row
+    ' visibly jump sideways the moment editing begins. -1 = leave PsTextBox's own margins alone.
+    nEditTextInset  as integer = -1
     bEditTearingDown as boolean = false   ' guards the re-entrant commit that DestroyWindow's focus loss triggers
     BeginLabelEditCallback as BeginLabelEditCallbackFunc  ' optional pre-edit veto
     EndLabelEditCallback   as EndLabelEditCallbackFunc    ' optional commit accept/reject
@@ -1041,6 +1046,10 @@ declare sub      PsListTree_SetEditColors( byval hListControl as HWND, byval clr
 ' TRUE (default) selects the text so the first keystroke replaces it; FALSE leaves the caret at
 ' the end of it.
 declare sub      PsListTree_SetEditSelectAll( byval hListControl as HWND, byval enable as boolean )
+' Where the editor's TEXT starts, in ALREADY-SCALED pixels from the edited cell's left edge.
+' Pass the same inset the paint callback uses for its cell text, or the text shifts sideways the
+' moment an edit opens. -1 (the default) leaves PsTextBox's margins alone.
+declare sub      PsListTree_SetEditTextInset( byval hListControl as HWND, byval nPx as integer )
 ' Probe: is a WM_CHAR swallow armed? The beep an unswallowed char causes has no return value, so
 ' this is the only way to assert the suppression rather than listen for it.
 declare function PsListTree_IsCharSwallowArmed( byval hListControl as HWND ) as boolean

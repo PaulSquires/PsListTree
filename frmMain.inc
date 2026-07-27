@@ -1415,6 +1415,49 @@ sub frmMain_RunSelfTest()
     PsListTree_EndEdit( HWND_FRMEXPLORER2, false )
     PsListTree_EnableLabelEdit( HWND_FRMEXPLORER2, false )
 
+    ' ---- 10m. THE EDITOR'S TEXT LINES UP WITH THE TEXT IT REPLACES. The box covers the whole
+    '           cell, but PsTextBox puts its RichEdit borderWidth inside the box and applies its
+    '           margins on top of that -- so an editor opened over a cell whose text the HOST
+    '           painted at some inset of its own started its text further left, and the row
+    '           visibly jumped sideways the moment editing began.
+    '
+    '           Measured with EM_POSFROMCHAR on the REAL RichEdit and mapped into the surface's
+    '           coordinates, which is the space the column rect is in -- not re-derived from the
+    '           borderWidth + margin arithmetic under test. ----
+    PsListTree_EnableLabelEdit( HWND_FRMEXPLORER2, true )
+    PsListTree_SetCellText( HWND_FRMEXPLORER2, 0, 2, "abcdef" )
+    dim as integer nInsetPx = 6
+    PsListTree_SetEditTextInset( HWND_FRMEXPLORER2, nInsetPx )
+    PsListTree_BeginEdit( HWND_FRMEXPLORER2, 0, 2 )
+    dim as HWND hEdIns = GetDlgItem( hSurfMv, IDC_FRMMAIN_LISTBOX + 3 )
+    dim as HWND hReIns = PsTextBox_GetRichEditHandle( hEdIns )
+    dim as POINTL ptChar
+    SendMessageW( hReIns, EM_POSFROMCHAR, cast(WPARAM, @ptChar), 0 )
+    dim as POINT ptSurf
+    ptSurf.x = ptChar.x : ptSurf.y = ptChar.y
+    MapWindowPoints( hReIns, hSurfMv, cast(LPPOINT, @ptSurf), 1 )
+    dim as RECT rcColIns
+    PsListTree_GetColumnRect( HWND_FRMEXPLORER2, 2, rcColIns )
+    dim as integer nGot = ptSurf.x - rcColIns.left
+    PsListTree_EndEdit( HWND_FRMEXPLORER2, false )
+    SelfTest_Check( "the editor's first character sits at the requested inset", _
+        (nGot = nInsetPx), "want=" & str(nInsetPx) & " got=" & str(nGot) & _
+        "  charX=" & str(ptSurf.x) & " colLeft=" & str(rcColIns.left) )
+
+    ' Unset (-1, the default) must leave PsTextBox's margins alone -- the inset is opt-in, and a
+    ' host that never calls it keeps whatever the editor did before.
+    PsListTree_SetEditTextInset( HWND_FRMEXPLORER2, -1 )
+    PsListTree_BeginEdit( HWND_FRMEXPLORER2, 0, 2 )
+    dim as HWND hEdNo = GetDlgItem( hSurfMv, IDC_FRMMAIN_LISTBOX + 3 )
+    SendMessageW( PsTextBox_GetRichEditHandle(hEdNo), EM_POSFROMCHAR, cast(WPARAM, @ptChar), 0 )
+    ptSurf.x = ptChar.x : ptSurf.y = ptChar.y
+    MapWindowPoints( PsTextBox_GetRichEditHandle(hEdNo), hSurfMv, cast(LPPOINT, @ptSurf), 1 )
+    dim as integer nGotNo = ptSurf.x - rcColIns.left
+    PsListTree_EndEdit( HWND_FRMEXPLORER2, false )
+    SelfTest_Check( "inset -1 leaves the editor where it was (opt-in)", _
+        (nGotNo < nInsetPx), "unset=" & str(nGotNo) & " inset=" & str(nInsetPx) )
+    PsListTree_EnableLabelEdit( HWND_FRMEXPLORER2, false )
+
     ' ---- 11. Border chrome ------------------------------------------------------------
     '  The border is drawn by the CONTAINER and its whole mechanism is that PositionWindows
     '  insets every child by the width. So the assertable claim is not "a frame was painted"

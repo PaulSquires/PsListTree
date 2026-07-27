@@ -2713,6 +2713,19 @@ function PsListTree_BeginEditInternal( byval pList as PSLISTTREE ptr, byval row 
     if xRight < xLeft + 8 then xRight = xLeft + 8
     SetWindowPos( pList->hEdit, HWND_TOP, xLeft, rcRow.top, xRight - xLeft, rcRow.bottom - rcRow.top, SWP_SHOWWINDOW )
 
+    ' Line the editor's TEXT up with the cell text the host painted. The box itself covers the
+    ' whole cell -- that part is right -- but PsTextBox puts its RichEdit `borderWidth` inside
+    ' the box and then applies its margins on top of that, so the text starts at
+    ' borderWidth + marginLeft. The host's inset is measured from the CELL edge, so the margin
+    ' has to be the difference. Without this the text jumps left by the host's inset the moment
+    ' an edit opens, and no longer lines up with the rows above and below.
+    if pList->nEditTextInset >= 0 then
+        dim as integer bw = PsTextBox_GetBorderWidth( pList->hEdit )
+        dim as integer nMargin = pList->nEditTextInset - bw
+        if nMargin < 0 then nMargin = 0
+        PsTextBox_SetMargins( pList->hEdit, nMargin, 0 )
+    end if
+
     ' Seed with the cell's current text.
     dim as PSLISTTREE_ROWINFO ptr pRow = pList->GetRow( row )
     dim as DWSTRING wszCur = ""
@@ -2853,6 +2866,12 @@ sub PsListTree_SetEditSelectAll( byval hListControl as HWND, byval enable as boo
     dim as PSLISTTREE ptr pList = GetListTreePointer(hListControl)
     if pList = null then return
     pList->bEditSelectAll = enable
+end sub
+
+sub PsListTree_SetEditTextInset( byval hListControl as HWND, byval nPx as integer )
+    dim as PSLISTTREE ptr pList = GetListTreePointer(hListControl)
+    if pList = null then return
+    pList->nEditTextInset = nPx
 end sub
 
 ' PROBE, public on purpose (PsButton_CountRenderedTones' precedent). A key claimed in WM_KEYDOWN
