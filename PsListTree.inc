@@ -819,6 +819,22 @@ sub PsListTree_SetSelChangeCallback( byval hListControl as HWND, byval usersub a
     pList->SelChangeCallback = usersub
 end sub
 
+sub PsListTree_SetActivateCallback( byval hListControl as HWND, byval usersub as ActivateCallbackSub )
+    dim as PSLISTTREE ptr pList = GetListTreePointer(hListControl)
+    if pList = null then return
+    pList->ActivateCallback = usersub
+end sub
+
+' Fire the row's default action. Refuses a non-selectable row for the same reason every
+' selection path does -- a row the user cannot land on cannot be the one they activated.
+private sub PsListTree_FireActivate( byval pList as PSLISTTREE ptr, byval modelRow as integer )
+    if pList = 0 then exit sub
+    if pList->ActivateCallback = 0 then exit sub
+    if pList->IsValidRow(modelRow) = false then exit sub
+    if pList->IsRowSelectable(modelRow) = false then exit sub
+    pList->ActivateCallback( pList->hWin, modelRow )
+end sub
+
 
 ' Resolve the tooltip text for a model row: host callback if set, else row Text.
 function PsListTree_ResolveTooltipText( byval pList as PSLISTTREE ptr, byval modelRow as integer ) as DWSTRING
@@ -2945,9 +2961,13 @@ function PsListTreeSurface_WndProc ( _
             ' navigation; claiming nothing lets IsDialogMessage route ENTER to the dialog's
             ' default button before WM_KEYDOWN can ever arrive here.
             ' Hoisted to one boolean: a 3-way andalso mixing a pointer relational with two
-            ' boolean fields trips fbc warning 38.
+            ' boolean fields trips fbc warning 38. Two independent reasons to want ENTER --
+            ' it opens an editor, or it fires the row's default action.
             dim as boolean bWantEnter = false
-            if pList <> 0 then bWantEnter = (pList->bEnterEdits = true) andalso (pList->bLabelEdit = true)
+            if pList <> 0 then
+                bWantEnter = (pList->bEnterEdits = true) andalso (pList->bLabelEdit = true)
+                if pList->ActivateCallback <> 0 then bWantEnter = true
+            end if
             if bWantEnter then
                 dim as MSG ptr pMsg = cast(MSG ptr, _lParam)
                 if pMsg then
@@ -3039,13 +3059,21 @@ function PsListTreeSurface_WndProc ( _
                             PsListTree_BeginEditInternal( pList, pList->focusRow, pList->editGestureCol )
                         return 0
                     case VK_RETURN
-                        ' Same as F2, opt-in. ENTER produces a WM_CHAR, so arm the swallow or
-                        ' the system beeps on every press -- the family-wide trap. Armed here
-                        ' rather than by re-reading state, because the state this key changes
-                        ' has already changed by the time its character arrives.
-                        if pList->bEnterEdits andalso pList->bLabelEdit then
+                        ' Two possible meanings, EDIT first: a list whose ENTER opens an editor
+                        ' does not also fire the row's default action. Either way ENTER produces
+                        ' a WM_CHAR, so arm the swallow or the system beeps on every press --
+                        ' the family-wide trap. Armed here rather than by re-reading state,
+                        ' because the state this key changes has already changed by the time its
+                        ' character arrives.
+                        dim as boolean bEnterEdit = (pList->bEnterEdits = true) andalso (pList->bLabelEdit = true)
+                        if bEnterEdit then
                             pList->bSwallowNextChar = true
                             PsListTree_BeginEditInternal( pList, pList->focusRow, pList->editGestureCol )
+                            return 0
+                        end if
+                        if pList->ActivateCallback <> 0 then
+                            pList->bSwallowNextChar = true
+                            PsListTree_FireActivate( pList, pList->focusRow )
                             return 0
                         end if
                         ' Not ours: fall through so the host's default button still works.
@@ -3352,6 +3380,11 @@ function PsListTreeSurface_WndProc ( _
                 if pList then m.idx = pList->VisibleToModel( idx )
                 if pList andalso pList->MessageCallback then
                     if pList->MessageCallback( @m ) then return 0
+                end if
+                ' A double-click is the row's default action. Fired AFTER the message callback,
+                ' so a host that claims the message keeps its old behaviour and never gets both.
+                if (uMsg = WM_LBUTTONDBLCLK) andalso (pList <> 0) then
+                    PsListTree_FireActivate( pList, m.idx )
                 end if
             end if
             return 0

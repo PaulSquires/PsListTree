@@ -445,6 +445,15 @@ sub SelfTest_SelChange( byval hCtl as HWND, byval row as integer )
     gSelChangeRow = row
 end sub
 
+' Activate recorder: double-click / ENTER fire the row's default action.
+dim shared gActivateCount as integer = 0
+dim shared gActivateRow as integer = -99
+
+sub SelfTest_Activate( byval hCtl as HWND, byval row as integer )
+    gActivateCount += 1
+    gActivateRow = row
+end sub
+
 ' Edit-lifecycle test callbacks: one vetoes BeginEdit, one rejects the committed text.
 function SelfTest_VetoBegin( byval hCtl as HWND, byval row as integer ) as boolean
     return false
@@ -1291,6 +1300,67 @@ sub frmMain_RunSelfTest()
     SelfTest_Check( "ENTER arms the WM_CHAR swallow and the char consumes it", _
         okArmed andalso okDisarmed, "armed=" & str(okArmed) & " disarmed=" & str(okDisarmed) )
 
+    PsListTree_SetEnterEdits( HWND_FRMEXPLORER2, false )   ' 10i left it ON; 10j starts clean
+
+    ' ---- 10j. THE ROW'S DEFAULT ACTION. Double-click and ENTER are one concept, so they are
+    '           one callback -- a host wiring them separately would keep two handlers in step.
+    '           ENTER is claimed only because a callback is set; with none, it must reach the
+    '           host's default button untouched. ----
+    dim as LRESULT dcNone = SendMessageW( hSurfMv, WM_GETDLGCODE, VK_RETURN, cast(LPARAM, @mDlgEnter) )
+    SelfTest_Check( "no activate callback -> ENTER is left alone", _
+        ((dcNone and DLGC_WANTALLKEYS) = 0), "code=&h" & hex(dcNone) )
+
+    PsListTree_SetActivateCallback( HWND_FRMEXPLORER2, @SelfTest_Activate )
+    dim as LRESULT dcAct = SendMessageW( hSurfMv, WM_GETDLGCODE, VK_RETURN, cast(LPARAM, @mDlgEnter) )
+    SelfTest_Check( "an activate callback makes the control claim ENTER", _
+        ((dcAct and DLGC_WANTALLKEYS) <> 0), "code=&h" & hex(dcAct) )
+
+    ' ENTER fires it, on the FOCUSED row, and swallows its WM_CHAR.
+    gActivateCount = 0 : gActivateRow = -99
+    PsListTree_SetCurSel( HWND_FRMEXPLORER2, 3 )
+    SendMessageW( hSurfMv, WM_KEYDOWN, VK_RETURN, 0 )
+    dim as boolean okActArmed = PsListTree_IsCharSwallowArmed( HWND_FRMEXPLORER2 )
+    SendMessageW( hSurfMv, WM_CHAR, VK_RETURN, 0 )
+    ' Hoisted: an andalso chain mixing relationals with a boolean local trips warning 38.
+    dim as boolean okActOnce = (gActivateCount = 1)
+    dim as boolean okActRow  = (gActivateRow = 3)
+    SelfTest_Check( "ENTER fires activate on the focused row, char swallowed", _
+        okActOnce andalso okActRow andalso okActArmed, _
+        "n=" & str(gActivateCount) & " row=" & str(gActivateRow) & " armed=" & str(okActArmed) )
+
+    ' A double-click fires the SAME callback. Driven as a real WM_LBUTTONDBLCLK at a point taken
+    ' from the row's OWN painted rect (captured through the real paint path), so the
+    ' visible->model mapping is exercised rather than assumed.
+    PsListTree_SetPaintCallback( HWND_FRMEXPLORER2, @SelfTest_RowCapturePaint )
+    if SelfTest_GrabRow( HWND_FRMEXPLORER2, 2 ) then
+        dim as RECT rcRowAct = gSelfTestRowRc
+        gSelfTestWantRow = -2
+        gActivateCount = 0 : gActivateRow = -99
+        dim as LPARAM lpAct = ((rcRowAct.top + 2) shl 16) or (rcRowAct.left + 8)
+        SendMessageW( hSurfMv, WM_LBUTTONDBLCLK, 0, lpAct )
+        SelfTest_Check( "double-click fires the same activate callback", _
+            (gActivateCount = 1) andalso (gActivateRow = 2), _
+            "n=" & str(gActivateCount) & " row=" & str(gActivateRow) & _
+            " rc=" & SelfTest_RectStr(rcRowAct) )
+    else
+        SelfTest_Check( "double-click fires the same activate callback", false, "row 2 not painted" )
+    end if
+    PsListTree_SetPaintCallback( HWND_FRMEXPLORER2, @PsListTree_PaintCallback )
+
+    ' EDIT WINS. With both wired, ENTER opens the editor and does NOT also activate -- asserted
+    ' because "fire both" is the natural thing for a later edit to do.
+    PsListTree_EnableLabelEdit( HWND_FRMEXPLORER2, true )
+    PsListTree_SetEnterEdits( HWND_FRMEXPLORER2, true )
+    gActivateCount = 0
+    PsListTree_SetCurSel( HWND_FRMEXPLORER2, 1 )
+    SendMessageW( hSurfMv, WM_KEYDOWN, VK_RETURN, 0 )
+    dim as boolean okEditWon = PsListTree_IsEditing( HWND_FRMEXPLORER2 )
+    PsListTree_EndEdit( HWND_FRMEXPLORER2, false )
+    SelfTest_Check( "SetEnterEdits wins over activate: ENTER edits, does not activate", _
+        okEditWon andalso (gActivateCount = 0), _
+        "editing=" & str(okEditWon) & " activates=" & str(gActivateCount) )
+
+    PsListTree_SetActivateCallback( HWND_FRMEXPLORER2, 0 )
     PsListTree_SetEnterEdits( HWND_FRMEXPLORER2, false )
     PsListTree_SetEditColumn( HWND_FRMEXPLORER2, 0 )
     PsListTree_EnableLabelEdit( HWND_FRMEXPLORER2, false )
