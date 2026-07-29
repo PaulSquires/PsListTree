@@ -862,14 +862,17 @@ end function
 ' ========================================================================================
 ' NEW: this control's tooltip handle used to be private, so a host could not
 ' reach the tip at all -- no TTM_*, and no way to see whether one existed.
+' The comctl32 handle, and 0 while on PsTooltip -- the honest answer, since a TTM_* sent
+' to a PsTooltip window is silently ignored.
 function PsListTree_GetTooltipHandle( byval hListControl as HWND ) as HWND
     dim as PSLISTTREE ptr pList = GetListTreePointer(hListControl)
     if pList = 0 then return 0
     return PsTipHost_SysHandle( @pList->tip )
 end function
 
-' The comctl32 handle, and 0 while on PsTooltip -- the honest answer, since a TTM_* sent
-' to a PsTooltip window is silently ignored.
+' The PsTooltip window, and 0 while on the system backend. This is the door to PsTooltip's
+' own SetColors/SetFonts/SetStyle/SetMaxWidth/SetTitle/SetGlyph, none of which is mirrored
+' on this control.
 function PsListTree_GetPsTooltipHandle( byval hListControl as HWND ) as HWND
     dim as PSLISTTREE ptr pList = GetListTreePointer(hListControl)
     if pList = 0 then return 0
