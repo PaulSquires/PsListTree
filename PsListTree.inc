@@ -259,7 +259,7 @@ end sub
 
 
 ' ========================================================================================
-' Add a string (and optional itemData) to the end of the custom listbox control.
+' Add a string (and optional itemData) to the end of the control.
 ' ========================================================================================
 function PsListTree_AddString( byval hListControl as HWND, byval Text as DWSTRING, byval itemData as integer = 0, byval itemDataExtra as integer = 0 ) as integer
     dim as PSLISTTREE ptr pList = GetListTreePointer(hListControl)
@@ -594,7 +594,7 @@ end function
 
 
 ' ========================================================================================
-' Set specified row text in the custom listbox control. Returns TRUE on success,
+' Set specified row text in the control. Returns TRUE on success,
 ' FALSE if the row index is invalid.
 ' ========================================================================================
 function PsListTree_SetText( byval hListControl as HWND, byval row as integer, byval Text as DWSTRING ) as boolean
@@ -610,7 +610,7 @@ end function
 
 
 ' ========================================================================================
-' Retrieve specified row text from the custom listbox control.
+' Retrieve specified row text from the control.
 ' ========================================================================================
 function PsListTree_GetText( byval hListControl as HWND, byval row as integer ) as DWSTRING
     dim as PSLISTTREE ptr pList = GetListTreePointer(hListControl)
@@ -789,7 +789,7 @@ end function
 
 
 ' ========================================================================================
-' Set the user defined row painting callback for the custom listbox control.
+' Set the user defined row painting callback for the control.
 ' ========================================================================================
 sub PsListTree_SetPaintCallback( byval hListControl as HWND, byval usersub as PaintCallbackSub )
     dim as PSLISTTREE ptr pList = GetListTreePointer(hListControl)
@@ -799,7 +799,7 @@ end sub
 
 
 ' ========================================================================================
-' Set the user defined message callback for the custom listbox control.
+' Set the user defined message callback for the control.
 ' ========================================================================================
 sub PsListTree_SetMessageCallback( byval hListControl as HWND, byval userfunc as MessageCallbackFunc )
     dim as PSLISTTREE ptr pList = GetListTreePointer(hListControl)
@@ -858,7 +858,7 @@ end function
 
 
 ' ========================================================================================
-' Set the tooltip hovertime for the custom listbox control.
+' Set the tooltip hovertime for the control.
 ' ========================================================================================
 ' NEW: this control's tooltip handle used to be private, so a host could not
 ' reach the tip at all -- no TTM_*, and no way to see whether one existed.
@@ -919,7 +919,7 @@ end sub
 
 
 ' ========================================================================================
-' Set specified row itemData for the custom listbox control.
+' Set specified row itemData for the control.
 ' Returns TRUE on success, FALSE if the row index is invalid.
 ' ========================================================================================
 function PsListTree_SetItemData( byval hListControl as HWND, byval row as integer, byval itemData as integer ) as boolean
@@ -944,7 +944,7 @@ end function
 
 
 ' ========================================================================================
-' Retrieve specified row itemData from the custom listbox control.
+' Retrieve specified row itemData from the control.
 ' ========================================================================================
 function PsListTree_GetItemData( byval hListControl as HWND, byval row as integer ) as integer
     dim as PSLISTTREE ptr pList = GetListTreePointer(hListControl)
@@ -1153,7 +1153,7 @@ end function
 
 
 ' ========================================================================================
-' Retrieve the row height from the custom listbox control.
+' Retrieve the row height from the control.
 ' ========================================================================================
 function PsListTree_GetRowHeight( byval hListControl as HWND ) as integer
     dim as PSLISTTREE ptr pList = GetListTreePointer(hListControl)
@@ -1163,7 +1163,7 @@ end function
 
 
 ' ========================================================================================
-' Set the row height for the custom listbox control.
+' Set the row height for the control.
 ' ========================================================================================
 function PsListTree_SetRowHeight( byval hListControl as HWND, byval height as integer ) as integer
     dim as PSLISTTREE ptr pList = GetListTreePointer(hListControl)
@@ -1616,7 +1616,7 @@ end sub
 
 
 ' ========================================================================================
-' Retrieve the background color from the custom listbox control.
+' Retrieve the background color from the control.
 ' ========================================================================================
 function PsListTree_GetBackColor( byval hListControl as HWND ) as COLORREF
     dim as PSLISTTREE ptr pList = GetListTreePointer(hListControl)
@@ -1626,7 +1626,7 @@ end function
 
 
 ' ========================================================================================
-' Set the background color for the custom listbox control.
+' Set the background color for the control.
 ' ========================================================================================
 function PsListTree_SetBackColor( byval hListControl as HWND, byval clr as COLORREF ) as COLORREF 
     dim as PSLISTTREE ptr pList = GetListTreePointer(hListControl)
@@ -1677,7 +1677,7 @@ end sub
 
 
 ' ========================================================================================
-' Retrieve the current row count in the custom listbox control.
+' Retrieve the current row count in the control.
 ' ========================================================================================
 function PsListTree_GetCount( byval hListControl as HWND ) as integer
     dim as PSLISTTREE ptr pList = GetListTreePointer(hListControl)
@@ -1687,7 +1687,7 @@ end function
 
 
 ' ========================================================================================
-' Refresh the custom listbox control.
+' Refresh the control.
 ' ========================================================================================
 sub PsListTree_Refresh( byval hListControl as HWND ) 
     dim as PSLISTTREE ptr pList = GetListTreePointer(hListControl)
@@ -2981,8 +2981,9 @@ function PsListTree_GetEditRow( byval hListControl as HWND ) as integer
 end function
 
 ' Which column the edit is on. The EndLabelEdit callback is not handed the column, so a host that
-' wants only ONE column editable reads it here and returns FALSE for the others -- F2 always opens
-' column 0, whatever column the host's own gesture opened last.
+' wants only ONE column editable reads it here and returns FALSE for the others -- the keyboard
+' and click gestures all open PsListTree_GetEditColumn's column, whatever column the host's own
+' programmatic BeginEdit opened last.
 '
 ' Unlike GetEditRow this does NOT reset to -1 when the edit ends, and that is deliberate:
 ' EndEditInternal tears the editor down BEFORE it calls EndLabelEdit, so a value cleared on

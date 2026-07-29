@@ -1039,10 +1039,12 @@ declare sub      PsListTree_SetTwistyGlyphs( byval hListControl as HWND, byval w
 ' focused row), on the programmatic BeginEdit, or -- when SetClickToEdit is on -- on a
 ' single click of the already-current row (explorer rename). It commits on Enter or focus
 ' loss and cancels on Esc. BeginLabelEdit can veto; EndLabelEdit can reject the new text.
-' ANY column is editable, but only column 0 has a gesture of its own: F2 and click-to-edit both
-' open column 0. Editing column N > 0 is programmatic -- the host resolves the clicked column
-' (PsListTree_GetColumnRect) and calls BeginEdit with it. The editor is placed over whichever
-' column is being edited; column 0 alone is inset past the tree indent and the twisty band.
+' ANY column is editable, and WHICH ONE THE GESTURES OPEN IS SETTABLE: F2, Enter (when
+' SetEnterEdits is on) and click-to-edit all open the column set by PsListTree_SetEditColumn,
+' which defaults to 0. Editing a different column on the same gesture is still programmatic --
+' the host resolves the clicked column (PsListTree_GetColumnRect) and calls BeginEdit with it.
+' The editor is placed over whichever column is being edited; column 0 alone is inset past the
+' tree indent and the twisty band.
 ' All programmatic; EndEdit is silent.
 ' ----------------------------------------------------------------------------------------
 declare function PsListTree_EnableLabelEdit( byval hListControl as HWND, byval enable as boolean = true ) as boolean
