@@ -3,6 +3,8 @@
 ''
 
 #include once "PsColumnHeader.bi"
+' The tooltip backend switch, pulled in here so a host needs no extra include line.
+#include once "PsTipHost.inc"
 
 
 function GetColumnHeaderPointer( byval hHeader as HWND ) as PSCOLUMNHEADER ptr
@@ -311,13 +313,53 @@ end function
 function PsColumnHeader_GetTooltipHandle( byval hHeader as HWND ) as HWND
     dim as PSCOLUMNHEADER ptr pHdr = GetColumnHeaderPointer(hHeader)
     if pHdr = 0 then return 0
-    return pHdr->hToolTip
+    return PsTipHost_SysHandle( @pHdr->tip )
 end function
 
+' The comctl32 handle, and 0 while on PsTooltip -- the honest answer, since a TTM_* sent
+' to a PsTooltip window is silently ignored.
+function PsColumnHeader_GetPsTooltipHandle( byval hHeader as HWND ) as HWND
+    dim as PSCOLUMNHEADER ptr pHdr = GetColumnHeaderPointer(hHeader)
+    if pHdr = 0 then return 0
+    return PsTipHost_PsHandle( @pHdr->tip )
+end function
+
+function PsColumnHeader_SetTooltipMode( byval hHeader as HWND, byval nMode as long ) as boolean
+    dim as PSCOLUMNHEADER ptr pHdr = GetColumnHeaderPointer(hHeader)
+    if pHdr = 0 then return false
+    return PsTipHost_SetMode( @pHdr->tip, nMode )
+end function
+
+function PsColumnHeader_GetTooltipMode( byval hHeader as HWND ) as long
+    dim as PSCOLUMNHEADER ptr pHdr = GetColumnHeaderPointer(hHeader)
+    if pHdr = 0 then return PSTIP_MODE_SYSTEM
+    return PsTipHost_GetMode( @pHdr->tip )
+end function
+
+' The three delays go through PsTipHost, which STORES them as well as pushing them, so a
+' hover time set before a mode switch is still in force after it. Pushing straight at the
+' live tooltip loses it at the switch -- and the tip still appears, just on a different
+' beat, with nothing reporting the change.
 sub PsColumnHeader_SetHoverTime( byval hHeader as HWND, byval milliseconds as integer )
     dim as PSCOLUMNHEADER ptr pHdr = GetColumnHeaderPointer(hHeader)
-    if pHdr = 0 then return
+    if pHdr = 0 then exit sub
+    ' The field is STILL READ by TrackMouseEvent as dwHoverTime, so this setter
+    ' drives the hot-tracking dwell as well as the tooltip. Dropping it here would
+    ' silently change when the control considers itself hot.
     pHdr->HoverTime = milliseconds
+    PsTipHost_SetDelay( @pHdr->tip, TTDT_INITIAL, milliseconds )
+end sub
+
+sub PsColumnHeader_SetAutoPopTime( byval hHeader as HWND, byval milliseconds as long )
+    dim as PSCOLUMNHEADER ptr pHdr = GetColumnHeaderPointer(hHeader)
+    if pHdr = 0 then exit sub
+    PsTipHost_SetDelay( @pHdr->tip, TTDT_AUTOPOP, milliseconds )
+end sub
+
+sub PsColumnHeader_SetReshowTime( byval hHeader as HWND, byval milliseconds as long )
+    dim as PSCOLUMNHEADER ptr pHdr = GetColumnHeaderPointer(hHeader)
+    if pHdr = 0 then exit sub
+    PsTipHost_SetDelay( @pHdr->tip, TTDT_RESHOW, milliseconds )
 end sub
 
 
@@ -480,9 +522,12 @@ private sub PsColumnHeader_UpdateHotTracking( byval pHdr as PSCOLUMNHEADER ptr, 
         PsColumnHeader_InvalidateColumn( pHdr, pHdr->nLastHotIdx )
         PsColumnHeader_InvalidateColumn( pHdr, newHot )
         pHdr->nLastHotIdx = newHot
-        ' Column changed: pop the current tip so it re-queries TTN_GETDISPINFOW for the
-        ' new column on the next hover.
-        if pHdr->hToolTip then SendMessage( pHdr->hToolTip, TTM_POP, 0, 0 )
+        ' Item changed. On the system backend this pops the tip so it re-queries
+        ' TTN_GETDISPINFOW for the new item; on PsTooltip it moves the tool index, which
+        ' hides a visible tip and re-resolves on the next dwell. One call site either way --
+        ' and the index is what lets the PsTooltip backend report WHICH item a tip is for,
+        ' which comctl32 never knew.
+        PsTipHost_SetToolIndex( @pHdr->tip, newHot )
     end if
 
     if newDiv <> pHdr->nHotDividerIdx then
@@ -822,7 +867,7 @@ function PsColumnHeader_WndProc( _
 
     case WM_NCDESTROY
         if pHdr then
-            if IsWindow(pHdr->hToolTip) then DestroyWindow(pHdr->hToolTip)
+            PsTipHost_Destroy( @pHdr->tip )
             delete(pHdr)
         end if
         dim as CWindow ptr pWindow = AfxCWindowPtr(hwnd)
@@ -838,34 +883,17 @@ end function
 
 
 ' ========================================================================================
-' Create a tooltip that pulls its text on demand (LPSTR_TEXTCALLBACK) for the whole
-' control -- one tool covering the entire band, because the columns are painted rects
-' rather than windows. TTN_GETDISPINFOW goes to TOOLINFO.hwnd, which is the control
-' itself (NOT the parent form), and PsColumnHeader_WndProc answers it using the current
-' hot column.
+' Supply the tooltip text to the PsTooltip backend.
+'
+' This thunk is why PsTipHost never learns the text policy: PsColumnHeader_ResolveTooltipText
+' stays the ONE place that decides what a tip says, and the system backend reaches the
+' same function by the other road (comctl32 asking through TTN_GETDISPINFOW), which is
+' why that arm stays in the WndProc.
 ' ========================================================================================
-private function PsColumnHeader_AddTooltip( byval hCtrl as HWND ) as HWND
-    if IsWindow(hCtrl) = 0 then return 0
-    dim as HWND hToolTip = CreateWindowExW( 0, "tooltips_class32", "", _
-                                            WS_POPUP or TTS_ALWAYSTIP, _
-                                            0, 0, 0, 0, NULL, NULL, NULL, NULL )
-    if hToolTip = 0 then return 0
-    SetWindowPos( hToolTip, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE or SWP_NOSIZE or SWP_NOACTIVATE )
-
-    dim tti as TOOLINFOW
-    ' cbSize must match the running comctl32 version (see AfxNova AfxAddTooltip).
-    #ifdef __FB_64BIT__
-        if AfxComCtlVersion < 600 then tti.cbSize = 64 else tti.cbSize = 72
-    #else
-        if AfxComCtlVersion < 600 then tti.cbSize = 44 else tti.cbSize = 48
-    #endif
-    tti.uFlags   = TTF_IDISHWND or TTF_SUBCLASS
-    tti.hwnd     = hCtrl
-    tti.uId      = cast(UINT_PTR, hCtrl)
-    tti.hinst    = GetModuleHandleW(NULL)
-    tti.lpszText = LPSTR_TEXTCALLBACK
-    SendMessageW( hToolTip, TTM_ADDTOOLW, 0, cast(LPARAM, @tti) )
-    return hToolTip
+private function PsColumnHeader_TipTextCallback( byval hTooltip as HWND, byval hAttached as HWND, _
+                                        byval idx as long ) as DWSTRING
+    dim as DWSTRING wszOut = PsColumnHeader_ResolveTooltipText( GetColumnHeaderPointer(hAttached), cast(integer, idx) )
+    return wszOut
 end function
 
 
@@ -894,7 +922,10 @@ function PsColumnHeader_Create( byval hWndParent as HWND, byval CtrlID as intege
     ' Store the new pointer into the user data area of the header window
     pWindow->UserData(0) = cast(LONG_PTR, pHdr)
 
-    pHdr->hToolTip = PsColumnHeader_AddTooltip( hCtrl )
+    ' AFTER UserData, not before: PsColumnHeader_TipTextCallback resolves the control through
+    ' GetColumnHeaderPointer(hAttached), which reads exactly that slot.
+    PsTipHost_Ensure( @pHdr->tip, hCtrl, @PsColumnHeader_TipTextCallback )
+
 
     function = hCtrl
 

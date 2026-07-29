@@ -15,6 +15,9 @@
 #pragma once
 
 #include once "PsBufferPaint.bi"
+' The tooltip backend switch. The control ships on the SYSTEM (comctl32) backend exactly
+' as it always has; a host opts an instance into PsTooltip with PsColumnHeader_SetTooltipMode.
+#include once "PsTipHost.bi"
 
 ' Polling timer that guarantees hot-tracking is cleared when the mouse leaves the
 ' control. WM_MOUSELEAVE (TME_LEAVE) is not reliably delivered on fast exits, so a
@@ -112,7 +115,10 @@ type HDR_AutoSizeCallbackFunc as function( byval hHeader as HWND, byval idx as i
 
 type PSCOLUMNHEADER
     hWin              as HWND
-    hToolTip          as HWND
+    ' The tooltip, whichever backend it is on. Replaces the old hToolTip + HoverTime
+    ' pair; PsColumnHeader_GetTooltipHandle still answers the comctl32 handle, and 0 while
+    ' this instance is on PsTooltip.
+    tip         as PSTIPHOST
     wszTooltip        as DWSTRING     ' instance-lifetime buffer TTN_GETDISPINFOW points at
     cols(any)         as PSCOLUMNHEADER_COLINFO
     colCount          as integer = 0
@@ -464,6 +470,16 @@ declare function PsColumnHeader_GetFont( byval hHeader as HWND ) as HFONT
 declare function PsColumnHeader_SetFont( byval hHeader as HWND, byval hFont as HFONT ) as boolean
 declare function PsColumnHeader_GetTooltipHandle( byval hHeader as HWND ) as HWND
 declare sub      PsColumnHeader_SetHoverTime( byval hHeader as HWND, byval milliseconds as integer )
+declare function PsColumnHeader_SetTooltipMode( byval hHeader as HWND, byval nMode as long ) as boolean
+declare function PsColumnHeader_GetTooltipMode( byval hHeader as HWND ) as long
+' The PsTooltip window, or 0 on the system backend. The door to PsTooltip's own
+' SetColors/SetFonts/SetStyle/SetMaxWidth/SetTitle/SetGlyph -- deliberately not mirrored
+' here, since thirteen controls x twenty setters is 260 wrappers to keep in step.
+declare function PsColumnHeader_GetPsTooltipHandle( byval hHeader as HWND ) as HWND
+' Honoured by BOTH backends. A delay never set keeps the backend's own derivation from
+' the system double-click time.
+declare sub      PsColumnHeader_SetAutoPopTime( byval hHeader as HWND, byval milliseconds as long )
+declare sub      PsColumnHeader_SetReshowTime( byval hHeader as HWND, byval milliseconds as long )
 
 ' ----------------------------------------------------------------------------------------
 ' Callbacks. See the type declarations above for each signature and contract.
