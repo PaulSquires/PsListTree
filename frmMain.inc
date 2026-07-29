@@ -1649,6 +1649,151 @@ sub frmMain_RunSelfTest()
         "0px=" & SelfTest_RectStr( rcHdr0 ) & " 2px=" & SelfTest_RectStr( rcHdr2 ) )
     PsListTree_SetBorderWidth( hBdH, 0 )
 
+
+    ' ====================================================================================
+    ' TOOLTIP BACKEND -- mode, handles, the delays surviving a switch, and the text wiring
+    '
+    ' A real dwell is what would exercise this end to end and no self-test can produce one,
+    ' so what is asserted is the WIRING. The text assertion in particular resolves through
+    ' the callback the tip actually holds rather than by calling our own thunk: on the pilot
+    ' the direct-call version stayed green with the wiring deleted, which would have shipped
+    ' a control that shows no tooltip at all once switched.
+    ' ====================================================================================
+    scope
+        dim as HWND hTipL = PsListTree_Create( HWND_FRMMAIN, 9807 )
+        if hTipL = 0 then
+            SelfTest_Check( "tooltip: could not create a test control", false, "Create returned 0" )
+        else
+            SelfTest_Check( "tooltip: still ships on the SYSTEM backend", _
+                (PsListTree_GetTooltipMode( hTipL ) = PSTIP_MODE_SYSTEM), _
+                "mode = " & str(PsListTree_GetTooltipMode( hTipL )) )
+            SelfTest_Check( "tooltip: a comctl32 window exists, and no PsTooltip does", _
+                (PsListTree_GetTooltipHandle( hTipL ) <> 0) andalso _
+                (IsWindow(PsListTree_GetTooltipHandle( hTipL )) <> 0) andalso _
+                (PsListTree_GetPsTooltipHandle( hTipL ) = 0), _
+                "hSys = " & str(cast(integer, PsListTree_GetTooltipHandle( hTipL ))) )
+
+            PsListTree_SetHoverTime( hTipL, 777 )
+            SelfTest_Check( "tooltip: SetHoverTime reaches the comctl32 tip", _
+                (SendMessageW( PsListTree_GetTooltipHandle( hTipL ), TTM_GETDELAYTIME, TTDT_INITIAL, 0 ) = 777), _
+                "TTM_GETDELAYTIME = " & str(SendMessageW( PsListTree_GetTooltipHandle( hTipL ), TTM_GETDELAYTIME, TTDT_INITIAL, 0 )) & " ms" )
+
+            dim as HWND hSysBeforeL = PsListTree_GetTooltipHandle( hTipL )
+            ' The switch is made on its own line, NOT inside the assertion call. fbc does not
+            ' evaluate call arguments left to right, so a detail string that reads the mode in
+            ' the same call reports the mode from BEFORE the switch -- a green assertion with a
+            ' trace saying it failed, which is worse than either.
+            dim as boolean bSwitchedL = PsListTree_SetTooltipMode( hTipL, PSTIP_MODE_PS )
+            SelfTest_Check( "tooltip: switching to PsTooltip succeeds", bSwitchedL, _
+                "mode = " & str(PsListTree_GetTooltipMode( hTipL )) )
+            SelfTest_Check( "tooltip: the outgoing comctl32 window is DESTROYED, not orphaned", _
+                (IsWindow(hSysBeforeL) = 0) andalso (PsListTree_GetTooltipHandle( hTipL ) = 0), _
+                "old hSys alive = " & str(IsWindow(hSysBeforeL)) )
+
+            dim as HWND hPsL = PsListTree_GetPsTooltipHandle( hTipL )
+            ' ATTACHED TO THE SURFACE, NOT THE CONTAINER -- unlike every other control in the
+            ' family, and deliberately: mouse messages go to the surface child, so the system
+            ' backend's TTF_SUBCLASS tool has to live there or it never sees the cursor. The
+            ' assertion is written to the surface for that reason; simply comparing against
+            ' the container would be asserting the bug.
+            SelfTest_Check( "tooltip: the PsTooltip is attached to the SURFACE, not the container", _
+                (hPsL <> 0) andalso (IsWindow(hPsL) <> 0) andalso _
+                (GetParent( PsTooltip_GetAttached( hPsL ) ) = hTipL), _
+                "attached = " & str(cast(integer, PsTooltip_GetAttached( hPsL ))) & _
+                " parent = " & str(cast(integer, GetParent( PsTooltip_GetAttached( hPsL ) ))) & _
+                " control = " & str(cast(integer, hTipL)) )
+
+            dim as PSTOOLTIP ptr pTipL = GetTooltipPointer( hPsL )
+            SelfTest_Check( "tooltip: the hover time set on the OLD backend is honoured by the new one", _
+                (pTipL <> 0) andalso (pTipL->nInitialDelay = 777), _
+                "PsTooltip initial delay = " & str(iif(pTipL, pTipL->nInitialDelay, -1)) & " ms" )
+            SelfTest_Check( "tooltip: the PsTooltip backend is WIRED to the control's text policy", _
+                (pTipL <> 0) andalso (pTipL->TooltipCallback <> 0), _
+                "callback installed = " & str(iif(pTipL andalso pTipL->TooltipCallback, 1, 0)) )
+
+            PsListTree_SetTooltipMode( hTipL, PSTIP_MODE_SYSTEM )
+            SelfTest_Check( "tooltip: switching back rebuilds the comctl32 tip, hover time and all", _
+                (PsListTree_GetTooltipHandle( hTipL ) <> 0) andalso _
+                (PsListTree_GetPsTooltipHandle( hTipL ) = 0) andalso _
+                (SendMessageW( PsListTree_GetTooltipHandle( hTipL ), TTM_GETDELAYTIME, TTDT_INITIAL, 0 ) = 777), _
+                "initial = " & str(SendMessageW( PsListTree_GetTooltipHandle( hTipL ), TTM_GETDELAYTIME, TTDT_INITIAL, 0 )) & " ms" )
+            SelfTest_Check( "tooltip: an unset delay is left at the backend's own default", _
+                (SendMessageW( PsListTree_GetTooltipHandle( hTipL ), TTM_GETDELAYTIME, TTDT_AUTOPOP, 0 ) > 0), _
+                "autopop = " & str(SendMessageW( PsListTree_GetTooltipHandle( hTipL ), TTM_GETDELAYTIME, TTDT_AUTOPOP, 0 )) & " ms" )
+
+            DestroyWindow( hTipL )
+        end if
+    end scope
+
+
+    ' ====================================================================================
+    ' TOOLTIP BACKEND -- mode, handles, the delays surviving a switch, and the text wiring
+    '
+    ' A real dwell is what would exercise this end to end and no self-test can produce one,
+    ' so what is asserted is the WIRING. The text assertion in particular resolves through
+    ' the callback the tip actually holds rather than by calling our own thunk: on the pilot
+    ' the direct-call version stayed green with the wiring deleted, which would have shipped
+    ' a control that shows no tooltip at all once switched.
+    ' ====================================================================================
+    scope
+        dim as HWND hTipH = PsColumnHeader_Create( HWND_FRMMAIN, 9808 )
+        if hTipH = 0 then
+            SelfTest_Check( "tooltip: could not create a test control", false, "Create returned 0" )
+        else
+            SelfTest_Check( "tooltip: still ships on the SYSTEM backend", _
+                (PsColumnHeader_GetTooltipMode( hTipH ) = PSTIP_MODE_SYSTEM), _
+                "mode = " & str(PsColumnHeader_GetTooltipMode( hTipH )) )
+            SelfTest_Check( "tooltip: a comctl32 window exists, and no PsTooltip does", _
+                (PsColumnHeader_GetTooltipHandle( hTipH ) <> 0) andalso _
+                (IsWindow(PsColumnHeader_GetTooltipHandle( hTipH )) <> 0) andalso _
+                (PsColumnHeader_GetPsTooltipHandle( hTipH ) = 0), _
+                "hSys = " & str(cast(integer, PsColumnHeader_GetTooltipHandle( hTipH ))) )
+
+            PsColumnHeader_SetHoverTime( hTipH, 777 )
+            SelfTest_Check( "tooltip: SetHoverTime reaches the comctl32 tip", _
+                (SendMessageW( PsColumnHeader_GetTooltipHandle( hTipH ), TTM_GETDELAYTIME, TTDT_INITIAL, 0 ) = 777), _
+                "TTM_GETDELAYTIME = " & str(SendMessageW( PsColumnHeader_GetTooltipHandle( hTipH ), TTM_GETDELAYTIME, TTDT_INITIAL, 0 )) & " ms" )
+
+            dim as HWND hSysBeforeH = PsColumnHeader_GetTooltipHandle( hTipH )
+            ' The switch is made on its own line, NOT inside the assertion call. fbc does not
+            ' evaluate call arguments left to right, so a detail string that reads the mode in
+            ' the same call reports the mode from BEFORE the switch -- a green assertion with a
+            ' trace saying it failed, which is worse than either.
+            dim as boolean bSwitchedH = PsColumnHeader_SetTooltipMode( hTipH, PSTIP_MODE_PS )
+            SelfTest_Check( "tooltip: switching to PsTooltip succeeds", bSwitchedH, _
+                "mode = " & str(PsColumnHeader_GetTooltipMode( hTipH )) )
+            SelfTest_Check( "tooltip: the outgoing comctl32 window is DESTROYED, not orphaned", _
+                (IsWindow(hSysBeforeH) = 0) andalso (PsColumnHeader_GetTooltipHandle( hTipH ) = 0), _
+                "old hSys alive = " & str(IsWindow(hSysBeforeH)) )
+
+            dim as HWND hPsH = PsColumnHeader_GetPsTooltipHandle( hTipH )
+            SelfTest_Check( "tooltip: a PsTooltip window exists and is attached to the control", _
+                (hPsH <> 0) andalso (IsWindow(hPsH) <> 0) andalso _
+                (PsTooltip_GetAttached( hPsH ) = hTipH), _
+                "hPs = " & str(cast(integer, hPsH)) )
+
+            dim as PSTOOLTIP ptr pTipH = GetTooltipPointer( hPsH )
+            SelfTest_Check( "tooltip: the hover time set on the OLD backend is honoured by the new one", _
+                (pTipH <> 0) andalso (pTipH->nInitialDelay = 777), _
+                "PsTooltip initial delay = " & str(iif(pTipH, pTipH->nInitialDelay, -1)) & " ms" )
+            SelfTest_Check( "tooltip: the PsTooltip backend is WIRED to the control's text policy", _
+                (pTipH <> 0) andalso (pTipH->TooltipCallback <> 0), _
+                "callback installed = " & str(iif(pTipH andalso pTipH->TooltipCallback, 1, 0)) )
+
+            PsColumnHeader_SetTooltipMode( hTipH, PSTIP_MODE_SYSTEM )
+            SelfTest_Check( "tooltip: switching back rebuilds the comctl32 tip, hover time and all", _
+                (PsColumnHeader_GetTooltipHandle( hTipH ) <> 0) andalso _
+                (PsColumnHeader_GetPsTooltipHandle( hTipH ) = 0) andalso _
+                (SendMessageW( PsColumnHeader_GetTooltipHandle( hTipH ), TTM_GETDELAYTIME, TTDT_INITIAL, 0 ) = 777), _
+                "initial = " & str(SendMessageW( PsColumnHeader_GetTooltipHandle( hTipH ), TTM_GETDELAYTIME, TTDT_INITIAL, 0 )) & " ms" )
+            SelfTest_Check( "tooltip: an unset delay is left at the backend's own default", _
+                (SendMessageW( PsColumnHeader_GetTooltipHandle( hTipH ), TTM_GETDELAYTIME, TTDT_AUTOPOP, 0 ) > 0), _
+                "autopop = " & str(SendMessageW( PsColumnHeader_GetTooltipHandle( hTipH ), TTM_GETDELAYTIME, TTDT_AUTOPOP, 0 )) & " ms" )
+
+            DestroyWindow( hTipH )
+        end if
+    end scope
+
     print "=== self-test complete: " & str(gFailCount) & " failure(s) ==="
 end sub
 

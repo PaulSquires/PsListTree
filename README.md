@@ -59,9 +59,13 @@ The same control in its list modes. On the left a grouped single-column list —
 | `PsColumnHeader.bi` / `.inc` | The column header band the control embeds — see [PsColumnHeader.md](PsColumnHeader.md) |
 | `PsVScrollBar.bi` / `.inc` | The vertical scrollbar the control embeds |
 | `PsBufferPaint.bi` / `.inc` | The flicker-free drawing surface everything paints through |
+| `PsTipHost.bi` / `.inc` | The tooltip backend switch the control holds — not a control, no window of its own |
+| `PsTooltip.bi` / `.inc` | The owner-drawn tooltip `PsTipHost` can drive instead of the system one |
 
-All six files are required even if you never define a column and never touch the scrollbar:
-the control creates both children unconditionally.
+All ten files are required even if you never define a column, never touch the scrollbar and
+never leave the default system tooltip: the control creates both children unconditionally, and
+`PsListTree.bi` / `.inc` include the tooltip pair themselves. They add **no include line of
+their own** to your host — see *Include order* below.
 
 **Only if you enable in-place label editing** (`PsListTree_EnableLabelEdit`), copy four more —
 the editor is a `PsTextBox`, which uses `PsPopupMenu` for its right-click menu:
@@ -111,6 +115,12 @@ If you enable label editing, add the editor's two implementations **before** `Ps
 
 Get the order wrong and the errors point at `PsListTree.bi`, naming types rather than the
 missing include.
+
+`PsTipHost` and `PsTooltip` are **not** in either list on purpose. `PsListTree.bi` includes
+`PsTipHost.bi` and `PsListTree.inc` includes `PsTipHost.inc` (which pulls in `PsTooltip.inc`),
+so the four files must be present on disk but you never name them. Adding
+`#include once "PsTooltip.inc"` yourself is harmless — the headers are `#pragma once` — and
+equally unnecessary.
 
 The AfxNova headers come first, before any of the above:
 
@@ -524,6 +534,11 @@ Tooltips are resolved on demand: with no tooltip callback the hovered row's own 
 with one, whatever it returns, and `""` suppresses the tip entirely. The tip is popped when the
 hot row changes so the next hover re-queries.
 
+The tip is drawn by the **system** tooltip unless you move the instance onto the owner-drawn
+`PsTooltip` with `PsListTree_SetTooltipMode`. That choice changes only the drawing and the
+timing — never the text, which comes from the rule above either way. See *Tooltips* under the
+API reference.
+
 A left click calls `SetFocus` on the row surface **before** your message callback runs. If the
 list must not hold focus — an autocomplete popup over an editor, say — put the focus back from
 your callback.
@@ -590,7 +605,21 @@ Opt in with `PsListTree_EnableLabelEdit( h, true )`. An edit starts on **F2** (o
 on `PsListTree_BeginEdit`, or — with `PsListTree_SetClickToEdit( h, true )` — on a click of the
 row that is already current (explorer rename). **Enter commits, Esc cancels, clicking away
 commits.** The editor is a single-line `PsTextBox` created over the caption and destroyed on
-commit or cancel; only column 0 (the caption) is editable.
+commit or cancel.
+
+**Any column is editable, but only one has a gesture.** F2, Enter and click-to-edit all open
+whichever column `PsListTree_SetEditColumn` names — column 0, the caption, by default. To edit a
+different column from a click, resolve which one the click landed in with
+`PsListTree_GetColumnRect` from your message callback and call `PsListTree_BeginEdit( h, row,
+col )`, which is never constrained by the gesture column. Enter opens an editor only when
+`PsListTree_SetEnterEdits( h, true )` is on; it is off by default because claiming Enter would
+otherwise take it from your dialog's default button.
+
+Theme the editor with `PsListTree_SetEditColors` — the control creates it lazily and owns it, so
+there is no handle for you to reach, and without this it renders black on white whatever the list
+around it looks like. `PsListTree_SetEditTextInset` lines its text up with the inset your painter
+uses for cell text, and `PsListTree_SetEditSelectAll( h, false )` puts the caret at the end
+instead of selecting everything.
 
 > **Pump obligation.** A host that enables editing MUST call `PsListTree_FilterMessage( @msg )` in
 > its message loop, **ahead of `IsDialogMessage`** — otherwise `IsDialogMessage` eats Enter (as
@@ -620,10 +649,13 @@ Firm properties of the control, not settings:
 - **Nothing is drawn without a paint callback.** The background is filled, and that is all.
 - **All rows are the same height.** There is no per-row height, so a group header cannot be
   taller than its items.
-- **Groups do not nest.** One level of headers, and a group runs to the next header.
-- **Text setters do not repaint.** `PsListTree_SetText`, `SetCellText`, `SetItemData` and
-  `SetItemDataExtra` change the model and return — they do not invalidate. Call
-  `PsListTree_Refresh` after changing text on a list that is already on screen.
+- **Legacy group headers do not nest**, though tree nodes do. `AddHeader` + `AddString` builds a
+  depth-1 group that runs to the next header; for real depth use `AddNode` / `InsertNode`.
+- **The data setters do not repaint; the text setters do.** `PsListTree_SetText` and
+  `SetCellText` invalidate (coalesced by `BeginUpdate` / `EndUpdate`, so a wrapped bulk load
+  still costs one repaint). `SetItemData` and `SetItemDataExtra` change the model and return —
+  they draw nothing, which is right, since neither is on screen unless your painter puts it
+  there. Call `PsListTree_Refresh` if yours does.
 - **`PsListTree_SetBackColor` does not repaint either.** It stores the colour and returns the
   previous one. Set it before showing the control, or follow it with `PsListTree_Refresh`.
 - **Group-header rows never receive cells.** They span the full width even in report mode, so
@@ -657,8 +689,15 @@ Firm properties of the control, not settings:
   handle from `PsListTree_GetHeader`. Every other header callback passes straight through.
 - **No horizontal scrolling.** Columns wider than the client run off the right edge and are
   clipped there.
-- **No in-place editing, no drag-reorder of rows, no checkbox column, no icons.** Anything of
-  that kind is drawn by your painter and driven by your message callback.
+- **No checkbox column, no icons.** Anything of that kind is drawn by your painter and driven by
+  your message callback. (In-place editing and drag-reorder *are* built in, both opt-in.)
+- **Only one column has an editing gesture.** F2, Enter and click-to-edit all open whichever
+  single column `PsListTree_SetEditColumn` names (default 0). Editing any other column is
+  programmatic: resolve the clicked column with `PsListTree_GetColumnRect` and call
+  `PsListTree_BeginEdit` with it.
+- **Switching tooltip backend cannot change what a tip says.** Both backends resolve text
+  through the same rule — your tooltip callback if set, otherwise the row's own text. The
+  backend decides only how the tip is drawn and driven.
 
 ---
 
@@ -761,7 +800,59 @@ functions under *Callback registration*.
 | `PsListTree_SetRowHeight( h, height ) as integer` | Sets it and returns what you passed. Unscaled units — the control DPI-scales it, so do not pre-scale. Repaints and re-syncs the scrollbar, since rows-per-page changed. The scaled result is floored at 1 pixel. |
 | `PsListTree_GetFont( h ) as HFONT` | The font selected into the buffer before each row callback. |
 | `PsListTree_SetFont( h, hFont ) as boolean` | Sets it and repaints. **Borrowed, never owned** — keep it alive and destroy it yourself. Your paint callback may select a different font per row. |
-| `PsListTree_SetHoverTime( h, milliseconds )` | How long the cursor must rest on a row before `WM_MOUSEHOVER` and the tooltip. Default 250. |
+
+### Tooltips
+
+The control ships on the **system** tooltip (comctl32) and stays there unless you ask
+otherwise. `PsListTree_SetTooltipMode( h, PSTIP_MODE_PS )` moves that one instance onto
+`PsTooltip` instead: owner-drawn and themeable, it word-wraps to a maximum width without a
+hand-sent `TTM_SETMAXTIPWIDTH`, and it does not subclass the control it serves.
+
+The default is deliberate rather than timid — `PsTooltip`'s colour defaults are dark and the
+system tip is light, so a control that switched on its own would put a dark tip on a light form.
+
+Switching backend does **not** change what a tip says. Text resolution is the same either way:
+your `TooltipCallback` if one is set, otherwise the row's own text, with `""` suppressing the
+tip. Only the drawing and the driving differ.
+
+| Function | Description |
+|---|---|
+| `PsListTree_SetTooltipMode( h, nMode ) as boolean` | `PSTIP_MODE_SYSTEM` (default) or `PSTIP_MODE_PS`. Destroys the outgoing tip, builds the incoming one and re-applies the stored delays. A no-op when the mode is already the one asked for. Returns TRUE if the requested mode is live on return. |
+| `PsListTree_GetTooltipMode( h ) as long` | The current mode. `PSTIP_MODE_SYSTEM` for an invalid handle. |
+| `PsListTree_GetTooltipHandle( h ) as HWND` | The comctl32 tooltip window, for direct `TTM_*` messages — and **0 while the instance is on `PsTooltip`**, since a `TTM_*` sent to a `PsTooltip` window is silently ignored. |
+| `PsListTree_GetPsTooltipHandle( h ) as HWND` | The reverse: the `PsTooltip` window, and 0 on the system backend. This is the door to `PsTooltip_SetColors` / `SetFonts` / `SetStyle` / `SetMaxWidth` / `SetTitle` / `SetGlyph`, which are deliberately **not** mirrored on this control. |
+| `PsListTree_SetHoverTime( h, milliseconds )` | The initial dwell — how long the cursor must rest on a row before a tip appears. Default 250. **Double duty:** the same value is `TrackMouseEvent`'s `dwHoverTime`, so this also decides when the control considers a row hot. |
+| `PsListTree_SetAutoPopTime( h, milliseconds )` | How long a shown tip stays up before it hides itself. |
+| `PsListTree_SetReshowTime( h, milliseconds )` | The delay before a tip reappears when the cursor moves to another row while a tip is already up. |
+
+All three delays are honoured by **both** backends, and are stored rather than pushed straight
+at the live tooltip, so a delay set before a mode switch is still in force after it. A delay you
+never set keeps the backend's own value, derived from the system double-click time. A delay set
+to 0 is a real request for "no delay" and survives a switch as such.
+
+#### Theming every tip at once
+
+Per-instance theming through `GetPsTooltipHandle` works, but it is rarely what you want. The
+intended way to use `PSTIP_MODE_PS` is to set the process-wide defaults **before any control is
+created**, so every tip in the application matches without the host tracking handles:
+
+```freebasic
+dim as PSTOOLTIP_COLORS tipColors
+tipColors.BackColor = theme.BackColor
+tipColors.ForeColor = theme.ForeColor
+PsTooltip_SetDefaultColors( @tipColors )
+PsTooltip_SetDefaultFonts( ghFont(GUIFONT_9), ghFont(GUIFONTBOLD_10), ghFont(SYMBOLFONT_10) )
+PsTooltip_SetDefaultMaxWidth( 320 )
+PsTooltip_SetDefaultDelays( 400, 8000, 100 )
+
+' ... then create the control and opt it in:
+PsListTree_SetTooltipMode( hList, PSTIP_MODE_PS )
+```
+
+`PsTooltip_SetDefaultStyle` is available on the same footing, and `PsTooltip_ClearDefaults`
+disarms the lot. The fonts are **borrowed**: you keep ownership and must outlive every tip that
+uses them — the one real hazard here, since you are promising them to controls you never see.
+See `PsTooltip.bi` for the colour struct and the style constants.
 
 ### Border
 
@@ -820,10 +911,18 @@ before `IsDialogMessage`. See *Tree view and in-place editing*.
 | `PsListTree_EnableLabelEdit( h, enable = true ) as boolean` | Turns label editing on/off. Turning it off ends any edit in progress (as a cancel). |
 | `PsListTree_IsLabelEditEnabled( h ) as boolean` | Whether editing is enabled. |
 | `PsListTree_SetClickToEdit( h, enable = true ) as boolean` | When on (default OFF), a click on the already-current row starts an edit. |
-| `PsListTree_BeginEdit( h, row, col = 0 ) as boolean` | Starts an edit of `row`. FALSE if editing is off, the row is invalid / non-selectable / hidden, or `BeginLabelEdit` vetoes. Only `col = 0` is wired. |
+| `PsListTree_SetEditColumn( h, col ) as boolean` | Which single column F2, Enter and click-to-edit open. Default 0 (the caption); negatives clamp to 0. Does **not** constrain `BeginEdit`, which always names its own column. |
+| `PsListTree_GetEditColumn( h ) as integer` | That gesture column. 0 for an invalid handle. |
+| `PsListTree_SetEnterEdits( h, enable = true ) as boolean` | Enter starts an edit on the focused row. Default **OFF**, and opt-in separately from `EnableLabelEdit` because claiming Enter is not free — the control has to answer `WM_GETDLGCODE` with `DLGC_WANTALLKEYS` for that one message, or `IsDialogMessage` hands Enter to your default button first. Leave it off if Enter means something else in your dialog. It **wins over** `SetActivateCallback`: a list whose Enter opens an editor does not also activate. |
+| `PsListTree_SetEditColors( h, clrBack, clrFore, clrBorder, clrFocusBorder )` | Themes the in-place editor. The control creates the `PsTextBox` lazily and owns it, so there is no handle for you to colour and no moment to do it in — without this it renders in `PsTextBox`'s defaults, black on white, whatever the list around it looks like. Applies immediately to an editor that already exists, so a mid-session theme change is not one edit behind. |
+| `PsListTree_SetEditSelectAll( h, enable )` | TRUE (the default) selects the whole text so the first keystroke replaces it — explorer rename behaviour. FALSE puts the caret at the end instead, for edits that are usually amendments. |
+| `PsListTree_SetEditTextInset( h, nPx )` | Where the editor's **text** starts, in **already-scaled** pixels from the edited cell's left edge. Pass the same inset your paint callback uses for its cell text, or the row visibly jumps sideways the moment an edit opens. `-1` (the default) leaves `PsTextBox`'s own margins alone. |
+| `PsListTree_BeginEdit( h, row, col = 0 ) as boolean` | Starts an edit of `row`, on any column. FALSE if editing is off, the row is invalid / non-selectable / hidden, or `BeginLabelEdit` vetoes. The editor is placed over the named column; column 0 alone is inset past the tree indent and the twisty band. |
 | `PsListTree_EndEdit( h, bCommit = true ) as boolean` | Ends the current edit. `bCommit` runs it through `EndLabelEdit` and writes the text; returns TRUE if the model was actually written. |
 | `PsListTree_IsEditing( h ) as boolean` | Whether an edit is in progress. |
 | `PsListTree_GetEditRow( h ) as integer` | The model row being edited, or -1. |
+| `PsListTree_GetEditCol( h ) as integer` | The column the edit is on. `EndLabelEdit` is not handed the column, so a host that wants only one column editable reads it here and returns FALSE for the others. Unlike `GetEditRow` this does **not** reset when the edit ends — the editor is torn down before `EndLabelEdit` runs, so a value cleared on teardown would be unreadable at the one moment it is wanted. Outside an edit it reports the last one's column. |
+| `PsListTree_IsCharSwallowArmed( h ) as boolean` | Probe: is a `WM_CHAR` swallow armed? A key claimed in `WM_KEYDOWN` has a `WM_CHAR` manufactured for it, and an unswallowed one reaches `DefWindowProc` and beeps. The beep has no return value, so this flag is the only way to observe the suppression rather than listen for it. |
 | `PsListTree_FilterMessage( pMsg ) as boolean` | **Pump call** for editing hosts (before `IsDialogMessage`). Claims Enter/Esc for the active editor and forwards to its context menu. Returns TRUE if consumed; safe to call always. |
 
 ### Scrollbar
@@ -853,6 +952,7 @@ for the layout rules these delegate to.
 | `PsListTree_SetColumnText( h, idx, Text ) as boolean` | Sets it and repaints that header cell only — row cells are unaffected. FALSE for a bad index. |
 | `PsListTree_GetColumnWidth( h, idx ) as integer` | The column's width in pixels, already raised to its effective minimum. For the fill column this is the **laid-out** width, not the stored one. |
 | `PsListTree_SetColumnWidth( h, idx, nWidth ) as boolean` | Stores the width, clamped up to the column's effective minimum, and repaints the rows. **Silent** — no resize callback. On the fill column the value is stored but has no visual effect until that column stops being the fill. |
+| `PsListTree_GetColumnRect( h, idx, byref rc ) as boolean` | The column's laid-out rect in **surface client coordinates** — the same x space a mouse message delivered to your message callback carries, so this is how you answer "which column did that click land in" without re-deriving the layout from the widths (which would mean reproducing the fill column's stretch). `rc` is emptied first; FALSE for a bad index. `PsColumnHeader_GetColumnRect` on the handle from `GetHeader` reaches the same rect. |
 | `PsListTree_GetColumnMinWidth( h, idx ) as integer` | The column's own stored minimum. 0 means "use the control default". |
 | `PsListTree_SetColumnMinWidth( h, idx, nMinWidth ) as boolean` | Sets it; negatives become 0. Re-lays out and repaints. |
 | `PsListTree_GetFillColumn( h ) as integer` | The **resolved** index of the column that absorbs leftover width, or -1 if none. |
@@ -875,6 +975,7 @@ for the layout rules these delegate to.
 | `PsListTree_SetMessageCallback( h, userfunc )` | Installs an observer for the mouse messages. |
 | `PsListTree_SetTooltipCallback( h, userfunc )` | Installs the on-demand tooltip text supplier. Unset, the row's own text is used. |
 | `PsListTree_SetSelChangeCallback( h, usersub )` | Installs the handler told when the **user** moves the selection, by mouse or keyboard. |
+| `PsListTree_SetActivateCallback( h, usersub )` | Installs the row's **default action** handler — double-click, or Enter on the focused row. Setting it is what makes the control claim Enter; with no callback set, Enter is left alone and reaches your default button as before. `PsListTree_SetEnterEdits` wins over it. See below. |
 | `PsListTree_SetBeginLabelEditCallback( h, userfunc )` | Installs the pre-edit **veto** (return FALSE to block an edit). See below. |
 | `PsListTree_SetEndLabelEditCallback( h, userfunc )` | Installs the commit handler (return FALSE to reject the new text). See below. |
 | `PsListTree_SetExpandCollapseCallback( h, usersub )` | Installs the handler told when the **user** expands/collapses a node. Silent for the programmatic collapse/expand setters. See below. |
@@ -889,6 +990,26 @@ for the layout rules these delegate to.
 | `PsListTree_SetHeaderFont( h, hFont )` | The band's font, borrowed not owned. Passes straight through. |
 
 Passing 0 to any callback setter clears it.
+
+### Geometry and internals
+
+These are declared in `PsListTree.bi` rather than hidden, so they are listed here for
+completeness. Only the first is something a host has a reason to call.
+
+| Function | Description |
+|---|---|
+| `PsListTree_PositionWindows( hwnd ) as LRESULT` | Re-lays out the three children — header band, row surface, scrollbar strip — inside the container's client rect, honouring the border inset and the scrollbar's auto-hide. The control calls it from `WM_SIZE` and from every path that changes the layout, so you normally never need it. Reach for it only if you have changed something behind the control's back and the children have not caught up. Always returns 0. Takes the control handle, like everything else here. |
+
+The remaining four take a `PSLISTTREE ptr` — the control's private state struct, which a caller
+outside the implementation cannot form. They are internal machinery, visible only because
+`PSLISTTREE.Refresh` is defined in the header and has to call them:
+
+| Function | Role |
+|---|---|
+| `PsListTree_SyncViewFromModel( pList )` | Re-derives the top visible row from the model's `topRow` after any change, clamps it, and repaints. |
+| `PsListTree_SyncScrollBar( pList )` | Pushes the row count, page size and position into the scrollbar and applies the auto-hide decision. |
+| `PsListTree_CaptureTopRow( pList )` | Reads the surface's actual top row back into the model, before a rebuild, so a user's scroll survives it. |
+| `PsListTree_ItemsPerPage( pList ) as integer` | Rows that fit in the current client height, floored at 1. |
 
 ---
 
@@ -1079,6 +1200,30 @@ makes those safe to call from inside this handler. Nor does it fire when the use
 the row that is already current, or when a clamped arrow key does not actually move the caret —
 only a real change notifies.
 
+### Row activated
+
+```freebasic
+type ActivateCallbackSub as sub( byval hListControl as HWND, byval row as integer )
+```
+
+The row's **default action**: a double-click on it, or Enter while it is the focused row. One
+callback covers both because they are one concept (a listview's `LVN_ITEMACTIVATE`). `row` is
+the model index.
+
+User gestures only — never a programmatic selection change. A non-selectable row is refused for
+the same reason every selection path refuses it: a row the user cannot land on cannot be the one
+they activated.
+
+Two things follow from installing it. **Setting it is what makes the control claim Enter** — with
+no callback set, Enter is left alone and reaches your dialog's default button as before. And
+**`PsListTree_SetEnterEdits` wins over it**: a list whose Enter opens an editor does not also
+activate. Double-click still activates in that configuration.
+
+Two things suppress the double-click half of the gesture. `PsListTree_PreventDoubleClick` turns
+the double-click into a plain click, and a message callback that returns TRUE for
+`WM_LBUTTONDBLCLK` claims it — activation is fired **after** the message callback, so a host
+that handles the message itself never gets both.
+
 ### Label editing and expand/collapse
 
 ```freebasic
@@ -1148,6 +1293,13 @@ Defined in `PsListTree.bi`:
 | `IDT_CLISTTREE_HOTTRACK` | `&hCB01` | Timer id for the hover safety-net poll. Timer ids are per-window, so every instance shares it |
 | `PSLISTTREE_HOTTRACK_MS` | 100 | How often that poll checks whether the cursor has left |
 
+The tooltip backend values passed to `PsListTree_SetTooltipMode` come from `PsTipHost.bi`:
+
+| Constant | Value | Meaning |
+|---|---:|---|
+| `PSTIP_MODE_SYSTEM` | 0 | The comctl32 tooltip. **The default** |
+| `PSTIP_MODE_PS` | 1 | `PsTooltip` — owner-drawn, themeable, word-wrapping |
+
 Defaults the control starts with:
 
 | Setting | Default | Unit |
@@ -1172,7 +1324,9 @@ The fill-column designations passed to `PsListTree_SetFillColumn` come from `PsC
 ## Related controls
 
 `PsListTree` creates and owns two other controls. You never create either one, and both are
-destroyed with the list.
+destroyed with the list. It also holds a `PsTooltip` when you opt the instance into
+`PSTIP_MODE_PS` — see *Tooltips*; that one is not a child window and is reached with
+`PsListTree_GetPsTooltipHandle`.
 
 | Control | Role | Reached through |
 |---|---|---|

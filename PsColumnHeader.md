@@ -16,7 +16,7 @@ the measurement), a click-on-the-caption notification for host-driven sorting, a
 tooltips.
 
 The control never sorts, never takes focus, and never creates a child window.
-[PsListBox](README.md) embeds one above its rows, but the control works perfectly well on its
+[PsListTree](README.md) embeds one above its rows, but the control works perfectly well on its
 own.
 
 ---
@@ -31,6 +31,13 @@ own.
 | `PsColumnHeader.inc` | Implementation |
 | `PsBufferPaint.bi` | The flicker-free drawing surface the control paints through |
 | `PsBufferPaint.inc` | Its implementation |
+| `PsTipHost.bi` / `.inc` | The tooltip backend switch the control holds — not a control, no window of its own |
+| `PsTooltip.bi` / `.inc` | The owner-drawn tooltip `PsTipHost` can drive instead of the system one |
+
+The tooltip pair is required even if you never leave the default system tooltip:
+`PsColumnHeader.bi` includes `PsTipHost.bi` and `PsColumnHeader.inc` includes `PsTipHost.inc`
+(which pulls in `PsTooltip.inc`). They must be present on disk but you never name them in an
+include line of your own.
 
 **AfxNova is required.** The control is built on `CWindow`, and `PsBufferPaint` draws through
 `AfxNova\CGdiPlus.inc`. Sources include AfxNova relative to the workspace root
@@ -59,8 +66,8 @@ with the AfxNova headers ahead of both:
 using AfxNova
 ```
 
-If you are using the header **inside a PsListBox**, it must come before `PsListBox.inc` —
-`PsListBox.bi` names the `HDR_*` callback types without including this header itself. See the
+If you are using the header **inside a PsListTree**, it must come before `PsListTree.inc` —
+`PsListTree.bi` names the `HDR_*` callback types without including this header itself. See the
 include-order note in [README.md](README.md).
 
 **GDI+ must be running before the first repaint and must outlive the last one.** All geometry
@@ -161,9 +168,9 @@ function MyHeader_AutoSize( byval hHeader as HWND, byval idx as integer ) as int
 end function
 ```
 
-**Inside a PsListBox**, do not create the header — the list already owns one. Reach it with
-`PsListBox_GetHeader`, define columns with the `PsListBox_*Column*` wrappers, and register
-callbacks with `PsListBox_SetHeader*` / `PsListBox_SetColumn*`. See [README.md](README.md).
+**Inside a PsListTree**, do not create the header — the list already owns one. Reach it with
+`PsListTree_GetHeader`, define columns with the `PsListTree_*Column*` wrappers, and register
+callbacks with `PsListTree_SetHeader*` / `PsListTree_SetColumn*`. See [README.md](README.md).
 
 ---
 
@@ -373,8 +380,8 @@ Firm properties of the control, not settings:
 - **Inserting or deleting a column cancels any live press or drag** without firing callbacks,
   and clears the hover state — a gesture whose target just shifted is ambiguous, so it is
   abandoned rather than guessed at.
-- **Inside a PsListBox, the `WidthChanged` slot is taken.** Use
-  `PsListBox_SetColumnResizeCallback` instead; see [Related controls](#related-controls).
+- **Inside a PsListTree, the `WidthChanged` slot is taken.** Use
+  `PsListTree_SetColumnResizeCallback` instead; see [Related controls](#related-controls).
 
 ---
 
@@ -436,8 +443,44 @@ Every function takes the handle from `PsColumnHeader_Create` as its first argume
 | `PsColumnHeader_SetBackColor( h, clr ) as COLORREF` | Sets it, repaints, and returns the previous value. |
 | `PsColumnHeader_GetFont( h ) as HFONT` | The font stored for the band. |
 | `PsColumnHeader_SetFont( h, hFont ) as boolean` | Sets it and repaints. **Borrowed, never owned** — keep it alive and destroy it yourself. It does not drive layout, and your painter is free to select a different font per column. |
-| `PsColumnHeader_GetTooltipHandle( h ) as HWND` | The control's tooltip window, for direct `TTM_*` messages. |
-| `PsColumnHeader_SetHoverTime( h, milliseconds )` | How long the cursor must rest on a column before `WM_MOUSEHOVER` and the tooltip. Default 250. |
+
+### Tooltips
+
+The control ships on the **system** tooltip (comctl32) and stays there unless you ask
+otherwise. `PsColumnHeader_SetTooltipMode( h, PSTIP_MODE_PS )` moves that one instance onto
+`PsTooltip` instead: owner-drawn and themeable, it word-wraps to a maximum width without a
+hand-sent `TTM_SETMAXTIPWIDTH`, and it does not subclass the control it serves.
+
+The default is deliberate rather than timid — `PsTooltip`'s colour defaults are dark and the
+system tip is light, so a control that switched on its own would put a dark tip on a light form.
+
+Switching backend does **not** change what a tip says. Text resolution is the same either way:
+your `HDR_TooltipCallbackFunc` if one is set, otherwise the column's own caption, with `""`
+suppressing the tip. Only the drawing and the driving differ.
+
+| Function | Description |
+|---|---|
+| `PsColumnHeader_SetTooltipMode( h, nMode ) as boolean` | `PSTIP_MODE_SYSTEM` (default) or `PSTIP_MODE_PS`. Destroys the outgoing tip, builds the incoming one and re-applies the stored delays. A no-op when the mode is already the one asked for. Returns TRUE if the requested mode is live on return. |
+| `PsColumnHeader_GetTooltipMode( h ) as long` | The current mode. `PSTIP_MODE_SYSTEM` for an invalid handle. |
+| `PsColumnHeader_GetTooltipHandle( h ) as HWND` | The comctl32 tooltip window, for direct `TTM_*` messages — and **0 while the instance is on `PsTooltip`**, since a `TTM_*` sent to a `PsTooltip` window is silently ignored. |
+| `PsColumnHeader_GetPsTooltipHandle( h ) as HWND` | The reverse: the `PsTooltip` window, and 0 on the system backend. This is the door to `PsTooltip_SetColors` / `SetFonts` / `SetStyle` / `SetMaxWidth` / `SetTitle` / `SetGlyph`, which are deliberately **not** mirrored on this control. |
+| `PsColumnHeader_SetHoverTime( h, milliseconds )` | The initial dwell — how long the cursor must rest on a column before a tip appears. Default 250. **Double duty:** the same value is `TrackMouseEvent`'s `dwHoverTime`, so this also decides when the control considers a column hot. |
+| `PsColumnHeader_SetAutoPopTime( h, milliseconds )` | How long a shown tip stays up before it hides itself. |
+| `PsColumnHeader_SetReshowTime( h, milliseconds )` | The delay before a tip reappears when the cursor moves to another column while a tip is already up. |
+
+All three delays are honoured by **both** backends, and are stored rather than pushed straight
+at the live tooltip, so a delay set before a mode switch is still in force after it. A delay you
+never set keeps the backend's own value, derived from the system double-click time. A delay set
+to 0 is a real request for "no delay" and survives a switch as such.
+
+To theme every tip in the process at once — the intended way to use `PSTIP_MODE_PS` — call
+`PsTooltip_SetDefaultColors` / `SetDefaultFonts` / `SetDefaultStyle` / `SetDefaultMaxWidth` /
+`SetDefaultDelays` **before any control is created**, and then just opt each control in. The
+fonts are borrowed: you keep ownership and must outlive every tip that uses them. See the
+*Tooltips* section of [README.md](README.md) for a worked example.
+
+A header embedded in a `PsListTree` has its own independent tooltip and its own mode — setting
+the list's does not set the header's.
 
 ### Callback registration
 
@@ -447,7 +490,7 @@ Every function takes the handle from `PsColumnHeader_Create` as its first argume
 | `PsColumnHeader_SetMessageCallback( h, userfunc )` | Installs an observer for the mouse messages. |
 | `PsColumnHeader_SetTooltipCallback( h, userfunc )` | Installs the on-demand tooltip text supplier. Unset, the column's caption is used. |
 | `PsColumnHeader_SetClickCallback( h, usersub )` | Installs the completed-click-on-a-column-body handler — the sorting hook. |
-| `PsColumnHeader_SetWidthChangedCallback( h, usersub )` | Installs the user-resize handler. **Not for a header embedded in a PsListBox** — that slot belongs to the list; use `PsListBox_SetColumnResizeCallback`. |
+| `PsColumnHeader_SetWidthChangedCallback( h, usersub )` | Installs the user-resize handler. **Not for a header embedded in a PsListTree** — that slot belongs to the list; use `PsListTree_SetColumnResizeCallback`. |
 | `PsColumnHeader_SetAutoSizeCallback( h, userfunc )` | Installs the divider-double-click best-fit measurer. |
 
 Passing 0 to any callback setter clears it.
@@ -613,7 +656,7 @@ back on a cancel for free.
 `PsColumnHeader_SetColumnWidth` does **not** fire this — programmatic setters are silent, which
 is what makes it safe to call from inside this handler.
 
-**Embedded in a PsListBox, subscribe with `PsListBox_SetColumnResizeCallback` instead.**
+**Embedded in a PsListTree, subscribe with `PsListTree_SetColumnResizeCallback` instead.**
 
 ### Auto size
 
@@ -646,6 +689,13 @@ Defined in `PsColumnHeader.bi`:
 | `IDT_CCOLHDR_HOTTRACK` | `&hCB30` | Timer id for the hover safety-net poll, which doubles as the ESC poll during a drag. Timer ids are per-window, so every instance shares it |
 | `CCOLHDR_HOTTRACK_MS` | 100 | How often that poll runs |
 
+The tooltip backend values passed to `PsColumnHeader_SetTooltipMode` come from `PsTipHost.bi`:
+
+| Constant | Value | Meaning |
+|---|---:|---|
+| `PSTIP_MODE_SYSTEM` | 0 | The comctl32 tooltip. **The default** |
+| `PSTIP_MODE_PS` | 1 | `PsTooltip` — owner-drawn, themeable, word-wrapping |
+
 Defaults a new column starts with:
 
 | Setting | Default |
@@ -667,18 +717,18 @@ And the control itself:
 ## Related controls
 
 `PsColumnHeader` creates nothing and embeds nothing. It is, however, embedded by
-**[PsListBox](README.md)**, which places one above its rows and uses it as the single store for
-its column model — every `PsListBox_*Column*` function delegates here.
+**[PsListTree](README.md)**, which places one above its rows and uses it as the single store for
+its column model — every `PsListTree_*Column*` function delegates here.
 
-If your header is a PsListBox's, three rules apply:
+If your header is a PsListTree's, three rules apply:
 
 | Do | Instead of |
 |---|---|
-| Define columns with `PsListBox_AddColumn` and friends | `PsColumnHeader_AddColumn` on the child |
-| Subscribe to resizes with `PsListBox_SetColumnResizeCallback` | `PsColumnHeader_SetWidthChangedCallback` — that slot is the list's, and it needs it to repaint rows on every live drag |
-| Size the band with `PsListBox_SetHeaderHeight` and show it with `PsListBox_ShowHeader` | `SetWindowPos` / `ShowWindow` on the child, which the list re-lays out anyway |
+| Define columns with `PsListTree_AddColumn` and friends | `PsColumnHeader_AddColumn` on the child |
+| Subscribe to resizes with `PsListTree_SetColumnResizeCallback` | `PsColumnHeader_SetWidthChangedCallback` — that slot is the list's, and it needs it to repaint rows on every live drag |
+| Size the band with `PsListTree_SetHeaderHeight` and show it with `PsListTree_ShowHeader` | `SetWindowPos` / `ShowWindow` on the child, which the list re-lays out anyway |
 
 Everything else — padding, back colour, font, the paint, click, auto-size and tooltip
 callbacks, `GetColumnRect`, `HitTestDivider` — is safe to call directly on the handle from
-`PsListBox_GetHeader`, and several of those have `PsListBox_*` pass-through wrappers for
+`PsListTree_GetHeader`, and several of those have `PsListTree_*` pass-through wrappers for
 convenience.
