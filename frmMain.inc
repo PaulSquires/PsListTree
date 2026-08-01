@@ -1858,11 +1858,15 @@ end function
 ' ========================================================================================
 ' PsListTree_TooltipCallback  -- per-row tooltip text, resolved on demand
 ' ========================================================================================
-function PsListTree_TooltipCallback( byval hCtl as HWND, byval row as integer ) as DWSTRING
+function PsListTree_TooltipCallback( byval hCtl as HWND, byval row as integer, byval col as integer ) as DWSTRING
+    ' Trace which cell the tip was asked for. Build the line as a string FIRST -- a print on a
+    ' string & wstring concat interleaves nulls.
+    dim as string sTrace = "tooltip requested: row " & row & ", col " & col
+    print sTrace
     if PsListTree_IsHeader( hCtl, row ) then
         return "Group header: " & PsListTree_GetText( hCtl, row )
     end if
-    return "Row " & row & " -> " & PsListTree_GetText( hCtl, row )
+    return "Row " & row & " (col " & col & ") -> " & PsListTree_GetText( hCtl, row )
 end function
 
 

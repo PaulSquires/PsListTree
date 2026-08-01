@@ -1173,12 +1173,14 @@ the SelChange callback.
 ### Tooltip
 
 ```freebasic
-type TooltipCallbackFunc as function( byval hListControl as HWND, byval row as integer ) as DWSTRING
+type TooltipCallbackFunc as function( byval hListControl as HWND, byval row as integer, byval col as integer ) as DWSTRING
 ```
 
 Supplies the tooltip text for a model row, on demand — called only when a tip is about to show.
 Return `""` for no tooltip on that row. With no callback installed, the row's own text is used.
-`hListControl` is the control handle, not the surface.
+`hListControl` is the control handle, not the surface. `col` is the column the mouse was last
+over (0-based). A list with no header columns is one implicit column, so it reports `0`; with
+columns defined, `-1` means the cursor was past the last column.
 
 ### Selection changed
 
