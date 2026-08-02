@@ -435,6 +435,16 @@ dim shared gSelfTestIsExpanded  as boolean = false
 dim shared gSelfTestIndent      as integer = -1
 dim shared gSelfTestTwistyRc    as RECT
 
+' WM_MOUSEMOVE recorder: captures the model row the control reports under the cursor, so
+' the "idx is populated on a move" contract can be asserted without a real mouse.
+dim shared gMoveIdxSeen as integer = -99
+
+private function SelfTest_MoveRecorder( byval m as PSLISTTREE_MESSAGEINFO ptr ) as boolean
+    if m = 0 then return false
+    if m->uMsg = WM_MOUSEMOVE then gMoveIdxSeen = m->idx
+    return false        ' observe only; the control's own handling must still run
+end function
+
 ' SelChange recorder: the callback fires only for USER-driven selection moves, so the
 ' self-test can assert both that it fires (keyboard) and that it does not (setters).
 dim shared gSelChangeCount as integer = 0
@@ -1791,6 +1801,57 @@ sub frmMain_RunSelfTest()
                 "autopop = " & str(SendMessageW( PsColumnHeader_GetTooltipHandle( hTipH ), TTM_GETDELAYTIME, TTDT_AUTOPOP, 0 )) & " ms" )
 
             DestroyWindow( hTipH )
+        end if
+    end scope
+
+    ' ---- WM_MOUSEMOVE reports the MODEL ROW UNDER THE CURSOR ----------------------------
+    ' PSLISTTREE_MESSAGEINFO.idx is documented as "the MODEL row index under the mouse
+    ' (-1 if none)", and every other mouse message set it -- but WM_MOUSEMOVE did not. The
+    ' struct is initialised with .idx = -1, so a host was told "no row" for the whole surface
+    ' on every move. Nothing faults: -1 is the documented no-row answer, so a host reads it as
+    ' a legitimate miss and simply never acts.
+    '
+    ' Driven with SendMessage rather than a real cursor. That is legitimate here in a way it
+    ' would not be for a click: the claim is only that a field is populated from the message's
+    ' own lParam, and no capture, focus or timing is involved.
+    '
+    ' TWO of the three below are sensitive to the regression, not all three -- measured, not
+    ' assumed. The old code answered -1 everywhere, so the off-surface probe passed under it
+    ' too and is here to pin the documented no-row answer rather than to catch this bug.
+    scope
+        dim as HWND hMove = HWND_FRMEXPLORER
+        dim as HWND hSurfM = GetDlgItem( hMove, IDC_FRMMAIN_LISTBOX )
+        if (hMove <> 0) andalso (hSurfM <> 0) then
+            dim as integer rh = PsListTree_GetRowHeight( hMove )
+            dim as RECT rcM : GetClientRect( hSurfM, @rcM )
+
+            PsListTree_SetMessageCallback( hMove, @SelfTest_MoveRecorder )
+
+            gMoveIdxSeen = -99
+            SendMessageW( hSurfM, WM_MOUSEMOVE, 0, MAKELPARAM( 8, rh \ 2 ) )
+            dim as integer idxRow0 = gMoveIdxSeen
+
+            gMoveIdxSeen = -99
+            SendMessageW( hSurfM, WM_MOUSEMOVE, 0, MAKELPARAM( 8, (rh * 2) + (rh \ 2) ) )
+            dim as integer idxRow2 = gMoveIdxSeen
+
+            ' Off the surface entirely: the documented answer is -1, and the old code said 0.
+            ' BELOW the client rect rather than merely below the last row -- this demo's list
+            ' is full, so the bottom pixel of the client is still over a real row (measured:
+            ' it reported 17). A move can legitimately carry coordinates outside the client,
+            ' which is what makes this a fair probe rather than a contrived one.
+            gMoveIdxSeen = -99
+            SendMessageW( hSurfM, WM_MOUSEMOVE, 0, MAKELPARAM( 8, rcM.bottom + 4 ) )
+            dim as integer idxNone = gMoveIdxSeen
+
+            PsListTree_SetMessageCallback( hMove, 0 )
+
+            SelfTest_Check( "WM_MOUSEMOVE reports a real row under the cursor", _
+                (idxRow0 >= 0), "idx=" & str(idxRow0) )
+            SelfTest_Check( "WM_MOUSEMOVE reports DIFFERENT rows at different heights", _
+                (idxRow0 <> idxRow2), "row0=" & str(idxRow0) & " row2=" & str(idxRow2) )
+            SelfTest_Check( "WM_MOUSEMOVE reports -1 past the last row", _
+                (idxNone = -1), "idx=" & str(idxNone) )
         end if
     end scope
 
