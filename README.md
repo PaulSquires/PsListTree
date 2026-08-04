@@ -1342,3 +1342,32 @@ range and the scroll notification, and overwriting either desynchronises the thu
 list.
 
 `PsColumnHeader` also works standalone; it knows nothing about list boxes.
+
+## Running the demo
+
+The demo loads **Segoe Fluent Icons** at startup via `AddFontResourceEx`, and
+**aborts if the font is absent** — the control family draws its glyphs from it.
+
+The font ships with Windows 11 but is Microsoft's, not ours, so it is not
+redistributed here. Copy it in once before building:
+
+```bash
+copy C:\Windows\Fonts\SegoeIcons.ttf SegoeFluentIcons.ttf
+```
+
+Note the rename: Windows stores the file as `SegoeIcons.ttf`, while the family
+name is "Segoe Fluent Icons". On Windows 10 the font is not present at all.
+
+## Licence
+
+[Mozilla Public License 2.0](LICENSE).
+
+MPL-2.0 is file-level copyleft, chosen deliberately for a drop-in control:
+
+- **You may use this in closed-source software**, commercial or otherwise.
+  §3.2 permits static linking with no additional conditions.
+- **If you modify these files, publish those files' changes.** The obligation is
+  per-file — your own sources are unaffected however tightly they are combined
+  with these.
+- The Exhibit B "Incompatible With Secondary Licenses" notice is **not applied**,
+  which keeps this GPL-compatible.
